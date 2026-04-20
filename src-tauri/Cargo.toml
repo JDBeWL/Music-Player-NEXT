@@ -1,0 +1,29 @@
+[package]
+name = "MPNEXT"
+version = "0.1.0"
+description = "Mercurial Player NEXT"
+authors = ["JDBeWL"]
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lofty = "0.22"
+dirs = "5"
+tantivy = "0.22"
+once_cell = "1.19"
+base64 = "0.22"
+image = "0.25"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rayon = "1.10"

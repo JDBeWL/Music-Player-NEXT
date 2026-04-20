@@ -1,0 +1,64 @@
+.lyrics-style-classic .lyrics {
+    margin: 6px 0;
+    padding: 12px 20px 12px 12px;
+    font-size: 24px;
+    color: #64748b;
+    filter: blur(var(--lyrics-blur-amount, 2px));
+    opacity: var(--lyrics-inactive-opacity, 0.6);
+    transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+        color 0.25s ease,
+        background-color 0.25s ease,
+        margin 0.25s ease-in-out,
+        font-size 0.15s ease-in-out,
+        filter 0.25s ease,
+        opacity 0.25s ease;
+    word-break: break-word;
+    min-height: 1em;
+    cursor: pointer;
+    border-radius: 8px;
+    transform-origin: var(--align-origin, left center);
+    will-change: transform, font-size;
+    user-select: none;
+}
+
+.lyrics-style-classic .lyrics:hover {
+    background-color: #f1f5f9;
+}
+
+.lyrics-style-classic .lyrics.active {
+    font-size: 32px;
+    font-weight: bold;
+    transform: scale(1.01);
+    color: #0ea5e9;
+    filter: blur(0px);
+    opacity: 1;
+}
+
+.lyrics-style-classic .lyrics-display {
+    mask-image: none;
+    -webkit-mask-image: none;
+}
+
+/* 经典模式卡拉OK */
+@property --karaoke-progress {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: 0%;
+}
+
+.lyrics-style-classic .karaoke-text {
+    --inactive-color: rgba(14, 165, 233, 0.4);
+    --active-color: #0ea5e9;
+    --karaoke-progress: 0%;
+
+    background: linear-gradient(to right,
+            var(--active-color) var(--karaoke-progress),
+            var(--inactive-color) var(--karaoke-progress));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.lyrics-style-classic .karaoke-text.animating {
+    transition: --karaoke-progress 0.1s ease-out;
+}

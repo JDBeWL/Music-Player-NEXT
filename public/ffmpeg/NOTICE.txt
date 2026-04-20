@@ -1,0 +1,14 @@
+FFmpeg - LGPL 2.1
+====================
+
+This directory contains FFmpeg core files from @ffmpeg/core npm package.
+
+FFmpeg is a multimedia framework.
+Website: https://ffmpeg.org/
+License: GNU Lesser General Public License version 2.1 (LGPL 2.1)
+
+The full LGPL 2.1 license text is available at:
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+You may obtain the complete source code for FFmpeg from:
+https://github.com/FFmpeg/FFmpeg

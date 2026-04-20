@@ -1,0 +1,58 @@
+# Third-Party Licenses
+
+This project includes the following third-party components with their respective licenses:
+
+## FFmpeg - LGPL 2.1
+
+This program uses FFmpeg, which is licensed under the GNU Lesser General Public License version 2.1 (LGPL 2.1).
+
+FFmpeg Website: https://ffmpeg.org/
+FFmpeg Source: https://github.com/FFmpeg/FFmpeg
+
+### LGPL 2.1 License Text
+
+FFmpeg is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+### @ffmpeg/ffmpeg npm Package - LGPL 2.1
+
+The @ffmpeg/ffmpeg npm package used in this project is subject to the LGPL 2.1 license.
+
+npm Package: https://www.npmjs.com/package/@ffmpeg/ffmpeg
+
+## MIT Licensed Components
+
+The following components are licensed under the MIT License:
+
+### Vue 3
+- License: MIT License
+- Source: https://github.com/vuejs/core
+
+### Pinia
+- License: MIT License
+- Source: https://github.com/vuejs/pinia
+
+### Radix Vue
+- License: MIT License
+- Source: https://github.com/radix-vue/radix-vue
+
+### Lucide Icons
+- License: ISC License
+- Source: https://github.com/lucide-icons/lucide
+
+### Tauri
+- License: MIT License
+- Source: https://github.com/tauri-apps/tauri
+
+## Apache 2.0 Licensed Components
+
+### TypeScript
+- License: Apache License 2.0
+- Source: https://github.com/microsoft/TypeScript
+
+---
+
+For the full text of each license, please visit the respective project's license page or the Open Source Initiative (OSI) at https://opensource.org/.

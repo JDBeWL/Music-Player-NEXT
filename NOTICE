@@ -1,0 +1,13 @@
+Mercurial Player NEXT
+Copyright 2026
+
+This product includes software developed by Mercurial Player NEXT.
+
+This product uses the following third-party components:
+- FFmpeg (LGPL 2.1)
+- Vue 3 (MIT)
+- Pinia (MIT)
+- Radix Vue (MIT)
+- Lucide Icons (ISC)
+- Tauri (MIT)
+- TypeScript (Apache 2.0)

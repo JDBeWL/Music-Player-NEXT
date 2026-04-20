@@ -1,0 +1,521 @@
+export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
+
+export interface AudioTrack {
+  id: string;
+  path: string;
+  title: string;
+  artist?: string;
+  album?: string;
+  duration?: number;
+}
+
+type StateChangeCallback = (state: PlaybackState) => void;
+type ProgressCallback = (currentTime: number, duration: number) => void;
+type TrackEndCallback = () => void;
+
+interface CachedAudio {
+  buffer: AudioBuffer;
+  lastAccessed: number;
+}
+
+interface WorkerResponse {
+  type: 'init-complete' | 'convert-complete' | 'error' | 'progress';
+  data?: any;
+  error?: string;
+}
+
+class FFmpegAudioService {
+  private worker: Worker | null = null;
+  private audioContext: AudioContext | null = null;
+  private sourceNode: AudioBufferSourceNode | null = null;
+  private gainNode: GainNode | null = null;
+  private audioBuffer: AudioBuffer | null = null;
+
+  private state: PlaybackState = 'idle';
+  private startTime = 0;
+  private pauseTime = 0;
+  private currentTrack: AudioTrack | null = null;
+  private isInitialized = false;
+  private isInitializing = false;
+
+  private audioCache: Map<string, CachedAudio> = new Map();
+  private readonly MAX_CACHE_SIZE = 50;
+
+  private stateListeners: Set<StateChangeCallback> = new Set();
+  private progressListeners: Set<ProgressCallback> = new Set();
+  private trackEndListeners: Set<TrackEndCallback> = new Set();
+  private progressInterval: number | null = null;
+
+  private conversionPromises: Map<string, { resolve: (data: Uint8Array) => void; reject: (error: Error) => void }> = new Map();
+
+  async init(): Promise<void> {
+    if (this.isInitialized && this.audioContext) return;
+    if (this.isInitializing) return;
+
+    this.isInitializing = true;
+
+    try {
+      console.log('[FFmpeg] Initializing worker...');
+
+      // 创建 Web Worker
+      this.worker = new Worker(new URL('../../workers/ffmpeg.worker.ts', import.meta.url), {
+        type: 'module'
+      });
+
+      // 监听 Worker 消息
+      this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+        this.handleWorkerMessage(e.data);
+      };
+
+      this.worker.onerror = (error) => {
+        console.error('[FFmpeg] Worker error:', error);
+      };
+
+      // 初始化 Worker 中的 FFmpeg
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
+
+        const handler = (e: MessageEvent<WorkerResponse>) => {
+          if (e.data.type === 'init-complete') {
+            clearTimeout(timeout);
+            this.worker?.removeEventListener('message', handler);
+            resolve();
+          } else if (e.data.type === 'error') {
+            clearTimeout(timeout);
+            this.worker?.removeEventListener('message', handler);
+            reject(new Error(e.data.error));
+          }
+        };
+
+        this.worker?.addEventListener('message', handler);
+        this.worker?.postMessage({ type: 'init' });
+      });
+
+      this.audioContext = new AudioContext();
+      this.gainNode = this.audioContext.createGain();
+      this.gainNode.connect(this.audioContext.destination);
+
+      this.isInitialized = true;
+      console.log('[FFmpeg] Initialized successfully');
+    } finally {
+      this.isInitializing = false;
+    }
+  }
+
+  private handleWorkerMessage(response: WorkerResponse): void {
+    switch (response.type) {
+      case 'convert-complete':
+        const { trackId, audioData } = response.data;
+        const promise = this.conversionPromises.get(trackId);
+        if (promise) {
+          promise.resolve(new Uint8Array(audioData));
+          this.conversionPromises.delete(trackId);
+        }
+        break;
+
+      case 'error':
+        console.error('[FFmpeg] Worker error:', response.error);
+        // 拒绝所有等待的转换
+        this.conversionPromises.forEach(p => p.reject(new Error(response.error)));
+        this.conversionPromises.clear();
+        break;
+
+      case 'progress':
+        // 可以在这里更新进度条
+        break;
+    }
+  }
+
+  private async convertAudioInWorker(audioData: Uint8Array, extension: string, trackId: string): Promise<Uint8Array> {
+    if (!this.worker) {
+      throw new Error('Worker not initialized');
+    }
+
+    return new Promise<Uint8Array>((resolve, reject) => {
+      this.conversionPromises.set(trackId, { resolve, reject });
+
+      this.worker!.postMessage({
+        type: 'convert',
+        data: { audioData, extension, trackId }
+      }, [audioData.buffer]);
+    });
+  }
+
+  private setState(newState: PlaybackState) {
+    this.state = newState;
+    this.stateListeners.forEach(cb => cb(newState));
+  }
+
+  getState(): PlaybackState {
+    return this.state;
+  }
+
+  getCurrentTrack(): AudioTrack | null {
+    return this.currentTrack;
+  }
+
+  getCurrentTime(): number {
+    if (!this.audioContext || this.state !== 'playing') {
+      return this.pauseTime;
+    }
+    return this.audioContext.currentTime - this.startTime + this.pauseTime;
+  }
+
+  getDuration(): number {
+    return this.audioBuffer?.duration ?? 0;
+  }
+
+  onStateChange(callback: StateChangeCallback): () => void {
+    this.stateListeners.add(callback);
+    return () => this.stateListeners.delete(callback);
+  }
+
+  onProgress(callback: ProgressCallback): () => void {
+    this.progressListeners.add(callback);
+    return () => this.progressListeners.delete(callback);
+  }
+
+  onTrackEnd(callback: TrackEndCallback): () => void {
+    this.trackEndListeners.add(callback);
+    return () => this.trackEndListeners.delete(callback);
+  }
+
+  private evictOldestCache(): void {
+    if (this.audioCache.size >= this.MAX_CACHE_SIZE) {
+      let oldestKey: string | null = null;
+      let oldestTime = Infinity;
+
+      for (const [key, value] of this.audioCache.entries()) {
+        if (value.lastAccessed < oldestTime) {
+          oldestTime = value.lastAccessed;
+          oldestKey = key;
+        }
+      }
+
+      if (oldestKey) {
+        console.log('[FFmpeg] Evicting cache for:', oldestKey);
+        this.audioCache.delete(oldestKey);
+      }
+    }
+  }
+
+  private getCachedAudio(trackId: string): AudioBuffer | null {
+    const cached = this.audioCache.get(trackId);
+    if (cached) {
+      cached.lastAccessed = Date.now();
+      return cached.buffer;
+    }
+    return null;
+  }
+
+  private cacheAudio(trackId: string, buffer: AudioBuffer): void {
+    this.evictOldestCache();
+    this.audioCache.set(trackId, {
+      buffer,
+      lastAccessed: Date.now()
+    });
+  }
+
+  async preloadTrack(track: AudioTrack, audioData: Uint8Array): Promise<void> {
+    if (this.audioCache.has(track.id)) {
+      return;
+    }
+
+    try {
+      await this.init();
+
+      const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
+      let arrayBuffer: ArrayBuffer;
+
+      console.log('[FFmpeg] Preloading:', track.title);
+
+      // 判断是否需要 FFmpeg 转码
+      if (this.needsFFmpegConversion(extension)) {
+        const convertedData = await this.convertAudioInWorker(audioData, extension, `preload_${track.id}`);
+        const blob = new Blob([new Uint8Array(convertedData.buffer as ArrayBuffer)], { type: 'audio/wav' });
+        arrayBuffer = await blob.arrayBuffer();
+      } else {
+        // 原生支持的格式直接解码
+        const mimeType = this.getMimeType(extension);
+        const blob = new Blob([new Uint8Array(audioData.buffer as ArrayBuffer)], { type: mimeType });
+        arrayBuffer = await blob.arrayBuffer();
+      }
+
+      if (!this.audioContext) {
+        throw new Error('AudioContext not initialized');
+      }
+      const buffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+      this.cacheAudio(track.id, buffer);
+
+      console.log('[FFmpeg] Preloaded:', track.title);
+    } catch (error) {
+      console.warn('[FFmpeg] Preload failed for:', track.title, error);
+    }
+  }
+
+  private needsFFmpegConversion(extension: string): boolean {
+    // 只有这些格式需要 FFmpeg 转码
+    const needsConversion = ['ape', 'wma', 'tak', 'tta'];
+    return needsConversion.includes(extension);
+  }
+
+  private getMimeType(extension: string): string {
+    const mimeTypes: Record<string, string> = {
+      'mp3': 'audio/mpeg',
+      'flac': 'audio/flac',
+      'wav': 'audio/wav',
+      'ogg': 'audio/ogg',
+      'm4a': 'audio/mp4',
+      'aac': 'audio/aac',
+    };
+    return mimeTypes[extension] || 'audio/mpeg';
+  }
+
+  async load(track: AudioTrack, audioData: Uint8Array): Promise<void> {
+    console.log('[FFmpeg] Loading track (no play):', track.title);
+
+    this.stop();
+    this.setState('loading');
+    this.currentTrack = track;
+
+    try {
+      const cachedBuffer = this.getCachedAudio(track.id);
+      if (cachedBuffer) {
+        console.log('[FFmpeg] Using cached audio for:', track.title);
+        this.audioBuffer = cachedBuffer;
+        this.pauseTime = 0;
+        // 触发 progress 回调
+        this.progressListeners.forEach(cb => cb(0, cachedBuffer.duration));
+        this.setState('paused');
+        return;
+      }
+
+      await this.init();
+
+      const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
+      let arrayBuffer: ArrayBuffer;
+
+      if (this.needsFFmpegConversion(extension)) {
+        console.log('[FFmpeg] Converting in worker:', extension);
+        const convertedData = await this.convertAudioInWorker(audioData, extension, track.id);
+        const blob = new Blob([new Uint8Array(convertedData.buffer as ArrayBuffer)], { type: 'audio/wav' });
+        arrayBuffer = await blob.arrayBuffer();
+      } else {
+        console.log('[FFmpeg] Native decoding:', extension);
+        const mimeType = this.getMimeType(extension);
+        const blob = new Blob([new Uint8Array(audioData.buffer as ArrayBuffer)], { type: mimeType });
+        arrayBuffer = await blob.arrayBuffer();
+      }
+
+      if (!this.audioContext) {
+        throw new Error('AudioContext not initialized');
+      }
+      const buffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+      this.cacheAudio(track.id, buffer);
+      this.audioBuffer = buffer;
+      this.pauseTime = 0;
+
+      // 触发 progress 回调
+      this.progressListeners.forEach(cb => cb(0, buffer.duration));
+
+      this.setState('paused');
+      console.log('[FFmpeg] Track loaded, ready to play, duration:', buffer.duration);
+    } catch (error) {
+      console.error('[FFmpeg] Failed to load audio:', error);
+      this.setState('error');
+      throw error;
+    }
+  }
+
+  async loadAndPlay(track: AudioTrack, audioData: Uint8Array): Promise<void> {
+    console.log('[FFmpeg] Loading track:', track.title);
+
+    this.stop();
+    this.setState('loading');
+    this.currentTrack = track;
+
+    try {
+      const cachedBuffer = this.getCachedAudio(track.id);
+      if (cachedBuffer) {
+        console.log('[FFmpeg] Using cached audio for:', track.title);
+        this.audioBuffer = cachedBuffer;
+        this.pauseTime = 0;
+        this.play();
+        return;
+      }
+
+      await this.init();
+
+      const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
+      let arrayBuffer: ArrayBuffer;
+
+      // 判断是否需要 FFmpeg 转码
+      if (this.needsFFmpegConversion(extension)) {
+        console.log('[FFmpeg] Converting in worker:', extension);
+        const convertedData = await this.convertAudioInWorker(audioData, extension, track.id);
+        const blob = new Blob([new Uint8Array(convertedData.buffer as ArrayBuffer)], { type: 'audio/wav' });
+        arrayBuffer = await blob.arrayBuffer();
+      } else {
+        console.log('[FFmpeg] Native decoding:', extension);
+        // 原生支持的格式直接解码，不走 FFmpeg
+        const mimeType = this.getMimeType(extension);
+        const blob = new Blob([new Uint8Array(audioData.buffer as ArrayBuffer)], { type: mimeType });
+        arrayBuffer = await blob.arrayBuffer();
+      }
+
+      console.log('[FFmpeg] Decoding audio data...');
+
+      if (!this.audioContext) {
+        throw new Error('AudioContext not initialized');
+      }
+      const buffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+      console.log('[FFmpeg] Audio decoded successfully, duration:', buffer.duration);
+
+      this.cacheAudio(track.id, buffer);
+      this.audioBuffer = buffer;
+      this.pauseTime = 0;
+
+      console.log('[FFmpeg] Starting playback...');
+      this.play();
+
+    } catch (error) {
+      console.error('[FFmpeg] Failed to load audio:', error);
+      this.setState('error');
+      throw error;
+    }
+  }
+
+  play(): void {
+    console.log('[FFmpeg] play() called, state:', this.state);
+    console.log('[FFmpeg] audioContext:', !!this.audioContext);
+    console.log('[FFmpeg] audioBuffer:', !!this.audioBuffer);
+    console.log('[FFmpeg] gainNode:', !!this.gainNode);
+
+    if (!this.audioContext || !this.audioBuffer || !this.gainNode) {
+      console.error('[FFmpeg] Cannot play: missing audio context, buffer or gain node');
+      return;
+    }
+
+    if (this.audioContext.state === 'suspended') {
+      console.log('[FFmpeg] Resuming audio context...');
+      this.audioContext.resume();
+    }
+
+    this.sourceNode = this.audioContext.createBufferSource();
+    this.sourceNode.buffer = this.audioBuffer;
+    this.sourceNode.connect(this.gainNode);
+
+    this.sourceNode.onended = () => {
+      if (this.state === 'playing') {
+        console.log('[FFmpeg] Track ended');
+        this.pauseTime = 0;
+        this.trackEndListeners.forEach(cb => cb());
+      }
+    };
+
+    this.startTime = this.audioContext.currentTime;
+    this.sourceNode.start(0, this.pauseTime);
+    this.setState('playing');
+    console.log('[FFmpeg] Playing started');
+
+    this.startProgressTracking();
+  }
+
+  pause(): void {
+    if (this.state !== 'playing' || !this.audioContext) {
+      return;
+    }
+
+    this.pauseTime = this.getCurrentTime();
+    this.sourceNode?.stop();
+    this.sourceNode = null;
+    this.setState('paused');
+    this.stopProgressTracking();
+    console.log('[FFmpeg] Paused at', this.pauseTime);
+  }
+
+  stop(): void {
+    if (this.sourceNode) {
+      try {
+        this.sourceNode.stop();
+      } catch (e) {}
+      this.sourceNode = null;
+    }
+    this.pauseTime = 0;
+    this.stopProgressTracking();
+    this.setState('idle');
+  }
+
+  seek(time: number): void {
+    if (!this.audioBuffer) {
+      return;
+    }
+
+    const wasPlaying = this.state === 'playing';
+    if (wasPlaying) {
+      this.sourceNode?.stop();
+      this.sourceNode = null;
+    }
+
+    this.pauseTime = Math.max(0, Math.min(time, this.getDuration()));
+    console.log('[FFmpeg] Seek to', this.pauseTime);
+
+    if (wasPlaying) {
+      this.play();
+    }
+  }
+
+  setVolume(value: number): void {
+    if (this.gainNode) {
+      this.gainNode.gain.value = Math.max(0, Math.min(1, value));
+    }
+  }
+
+  getVolume(): number {
+    return this.gainNode?.gain.value ?? 1;
+  }
+
+  private startProgressTracking(): void {
+    this.stopProgressTracking();
+    this.progressInterval = window.setInterval(() => {
+      this.progressListeners.forEach(cb => {
+        cb(this.getCurrentTime(), this.getDuration());
+      });
+    }, 100);
+  }
+
+  private stopProgressTracking(): void {
+    if (this.progressInterval !== null) {
+      clearInterval(this.progressInterval);
+      this.progressInterval = null;
+    }
+  }
+
+  clearCache(): void {
+    this.audioCache.clear();
+    console.log('[FFmpeg] Cache cleared');
+  }
+
+  getCacheSize(): number {
+    return this.audioCache.size;
+  }
+
+  async destroy(): Promise<void> {
+    this.stop();
+    this.clearCache();
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    if (this.audioContext) {
+      await this.audioContext.close();
+      this.audioContext = null;
+    }
+  }
+}
+
+export const ffmpegService = new FFmpegAudioService();
+export { FFmpegAudioService };
