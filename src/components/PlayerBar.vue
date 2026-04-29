@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, onBeforeUnmount } from 'vue';
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'radix-vue';
 import {
   Play,
@@ -50,7 +50,8 @@ const emit = defineEmits<Emits>();
 const showVolumeSlider = ref(false);
 const isDragging = ref(false);
 const dragProgress = ref(0);
-const previousVolume = ref(0.7);
+const previousVolume = ref(0.5);
+const progressTrackRef = ref<HTMLElement | null>(null);
 
 const progress = computed(() => {
   if (isDragging.value) return dragProgress.value;
@@ -94,27 +95,68 @@ function toggleMute() {
   }
 }
 
-function handleMouseMove(e: MouseEvent) {
-  const target = e.currentTarget as HTMLElement;
-  const rect = target.getBoundingClientRect();
+function updateProgress(e: MouseEvent) {
+  if (!progressTrackRef.value) return;
+
+  const rect = progressTrackRef.value.getBoundingClientRect();
   const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-  
+  dragProgress.value = percent;
+
   if (isDragging.value) {
-    dragProgress.value = percent;
     emit('time-change', (percent / 100) * props.duration);
   }
 }
 
+function handleDocumentMouseMove(e: MouseEvent) {
+  if (isDragging.value) {
+    updateProgress(e);
+  }
+}
+
+function handleMouseUp() {
+  if (isDragging.value) {
+    isDragging.value = false;
+    document.removeEventListener('mousemove', handleDocumentMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+  }
+}
+
+function handleMouseDown(e: MouseEvent) {
+  isDragging.value = true;
+  updateProgress(e);
+
+  document.addEventListener('mousemove', handleDocumentMouseMove);
+  document.addEventListener('mouseup', handleMouseUp);
+}
+
 function handleSeek(e: MouseEvent) {
+  if (isDragging.value) return;
+
   const target = e.currentTarget as HTMLElement;
   const rect = target.getBoundingClientRect();
   const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+
+  // 立即更新视觉反馈
+  dragProgress.value = percent;
+  isDragging.value = true;
+
   emit('time-change', (percent / 100) * props.duration);
+
+  // 短暂延迟后恢复正常状态，让视觉更新生效
+  setTimeout(() => {
+    isDragging.value = false;
+  }, 100);
 }
+
+// 清理事件监听器
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', handleDocumentMouseMove);
+  document.removeEventListener('mouseup', handleMouseUp);
+});
 </script>
 
 <template>
-  <footer class="h-24 elevation-2 flex-shrink-0 z-[1100] no-select" style="border-top: 1px solid var(--border-subtle);">
+  <footer class="h-24 flex-shrink-0 z-[1100] no-select glass-surface" style="border-top: 1px solid var(--glass-border);">
     <div class="h-full grid grid-cols-[280px_1fr_280px] items-center px-6 gap-4">
       <div
         class="flex items-center gap-4 min-w-0 cursor-pointer group"
@@ -134,9 +176,9 @@ function handleSeek(e: MouseEvent) {
       </div>
 
       <div class="flex flex-col items-center gap-2 w-full max-w-2xl mx-auto">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
           <button
-            class="md3-icon-btn-sm state-layer"
+            class="md3-icon-btn-xs state-layer"
             :class="{ 'text-[var(--color-primary)]': isShuffle }"
             aria-label="随机播放"
             @click="emit('toggle-shuffle')"
@@ -149,16 +191,16 @@ function handleSeek(e: MouseEvent) {
             aria-label="上一首"
             @click="emit('play-prev')"
           >
-            <SkipBack :size="22" />
+            <SkipBack :size="20" />
           </button>
 
           <button
-            class="w-11 h-11 flex items-center justify-center rounded-full bg-[var(--color-primary)] hover:brightness-110 transition-all text-[var(--text-on-primary)]"
+            class="play-btn w-11 h-11 flex items-center justify-center rounded-xl bg-[var(--color-primary)] hover:brightness-110 transition-all text-[var(--text-on-primary)]"
             :aria-label="isPlaying ? '暂停' : '播放'"
             @click="emit('toggle-play')"
           >
-            <Pause v-if="isPlaying" :size="22" />
-            <Play v-else :size="22" class="ml-0.5" />
+            <Pause v-if="isPlaying" :size="24" />
+            <Play v-else :size="24" class="ml-0.5" />
           </button>
 
           <button
@@ -166,11 +208,11 @@ function handleSeek(e: MouseEvent) {
             aria-label="下一首"
             @click="emit('play-next')"
           >
-            <SkipForward :size="22" />
+            <SkipForward :size="20" />
           </button>
 
           <button
-            class="md3-icon-btn-sm state-layer"
+            class="md3-icon-btn-xs state-layer"
             :class="{ 'text-[var(--color-primary)]': repeatMode !== 'none' }"
             aria-label="循环模式"
             @click="emit('cycle-repeat')"
@@ -186,6 +228,7 @@ function handleSeek(e: MouseEvent) {
         >
           <span class="text-xs text-[var(--text-tertiary)] tabular-nums min-w-[44px] text-right" aria-hidden="true">{{ formatTime(currentTime) }}</span>
           <div
+            ref="progressTrackRef"
             class="relative w-full h-4 flex items-center group cursor-pointer"
             role="slider"
             :aria-label="'播放进度'"
@@ -194,33 +237,26 @@ function handleSeek(e: MouseEvent) {
             :aria-valuemax="Math.round(duration)"
             :aria-valuetext="`${formatTime(currentTime)} / ${formatTime(duration)}`"
             tabindex="0"
-            @mousedown="isDragging = true"
-            @mouseup="isDragging = false"
-            @mouseleave="isDragging = false"
-            @mousemove="handleMouseMove"
+            @mousedown="handleMouseDown"
+            @click="handleSeek"
             @keydown.left.prevent="emit('time-change', Math.max(0, currentTime - 5))"
             @keydown.right.prevent="emit('time-change', Math.min(duration, currentTime + 5))"
           >
             <div class="absolute w-full h-1 bg-[var(--border-default)] rounded-full overflow-hidden">
               <div
-                class="h-full bg-[var(--color-primary)] rounded-full"
+                class="h-full bg-[var(--color-primary)] rounded-full transition-none"
                 :style="{
                   width: `${progress}%`,
-                  transitionProperty: isDragging ? 'none' : 'width',
-                  transitionDuration: isDragging ? '0ms' : '75ms'
                 }"
               />
             </div>
             <div
-              class="absolute w-full h-4 flex items-center"
-              @click="handleSeek"
+              class="absolute w-full h-4 flex items-center pointer-events-none"
             >
               <div
                 class="w-3 h-3 bg-[var(--color-primary)] rounded-full opacity-0 group-hover:opacity-100 scale-50 group-hover:scale-100 shadow-md transition-opacity transition-transform duration-200"
                 :style="{
                   marginLeft: `calc(${progress}% - 6px)`,
-                  transitionProperty: isDragging ? 'none' : 'margin-left',
-                  transitionDuration: isDragging ? '0ms' : '75ms'
                 }"
               />
             </div>
@@ -231,22 +267,22 @@ function handleSeek(e: MouseEvent) {
 
       <div class="flex items-center justify-end gap-1">
         <button
-          class="md3-icon-btn-sm state-layer"
+          class="md3-icon-btn-xs state-layer"
           :class="{ 'text-red-400': isFavorite }"
           :disabled="!currentTrack"
           aria-label="喜欢"
           @click="emit('toggle-favorite')"
         >
-          <Heart :size="20" :fill="isFavorite ? 'currentColor' : 'none'" />
+          <Heart :size="18" :fill="isFavorite ? 'currentColor' : 'none'" />
         </button>
 
         <button
-          class="md3-icon-btn-sm state-layer"
+          class="md3-icon-btn-xs state-layer"
           :class="{ 'text-[var(--color-primary)]': showQueuePanel }"
           aria-label="播放队列"
           @click="emit('toggle-queue')"
         >
-          <ListMusic :size="20" />
+          <ListMusic :size="18" />
         </button>
 
         <div
@@ -255,11 +291,11 @@ function handleSeek(e: MouseEvent) {
           @mouseleave="showVolumeSlider = false"
         >
           <button
-            class="md3-icon-btn-sm state-layer"
+            class="md3-icon-btn-xs state-layer"
             aria-label="音量"
             @click="toggleMute"
           >
-            <component :is="VolumeIcon" :size="20" />
+            <component :is="VolumeIcon" :size="18" />
           </button>
 
           <div
@@ -297,9 +333,20 @@ function handleSeek(e: MouseEvent) {
 </template>
 
 <style scoped>
+.glass-surface {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
+}
+
 .no-select {
   user-select: none;
   -webkit-user-select: none;
+}
+
+.play-btn svg {
+  width: 24px;
+  height: 24px;
 }
 
 .volume-control {

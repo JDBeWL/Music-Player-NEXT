@@ -7,14 +7,16 @@ import { createPinia } from 'pinia';
 import { MotionPlugin } from '@vueuse/motion';
 import { listen } from '@tauri-apps/api/event';
 import App from './App.vue';
+import router from './router';
 import { unifiedAudioPlayer } from './services/audio/UnifiedAudioPlayer';
-import { usePlayerStore } from './stores/playerStore';
+import { usePlaybackStore } from './stores/playbackStore';
 import './styles/index.css';
 
 const app = createApp(App);
 const pinia = createPinia();
 
 app.use(pinia);
+app.use(router);
 app.use(MotionPlugin);
 app.mount('#app');
 
@@ -22,7 +24,7 @@ unifiedAudioPlayer.init().catch(err => {
   console.warn('[Main] Failed to pre-initialize audio player:', err);
 });
 
-const playerStore = usePlayerStore();
+const playbackStore = usePlaybackStore();
 
 listen<{ detail: string; mode?: string | boolean }>('player-control', (event) => {
   const { detail, mode } = event.payload;
@@ -30,13 +32,13 @@ listen<{ detail: string; mode?: string | boolean }>('player-control', (event) =>
 
   switch (detail) {
     case 'toggle':
-      playerStore.togglePlay();
+      playbackStore.togglePlay();
       break;
     case 'next':
-      playerStore.playNext();
+      playbackStore.playNext();
       break;
     case 'prev':
-      playerStore.playPrev();
+      playbackStore.playPrev();
       break;
     case 'loop':
       if (typeof mode === 'string') {
@@ -47,12 +49,12 @@ listen<{ detail: string; mode?: string | boolean }>('player-control', (event) =>
         };
         const mappedMode = modeMap[mode];
         if (mappedMode) {
-          playerStore.setRepeatMode(mappedMode);
+          playbackStore.setRepeatMode(mappedMode);
         }
       }
       break;
     case 'shuffle':
-      playerStore.toggleShuffle();
+      playbackStore.toggleShuffle();
       break;
   }
 }).catch(err => {

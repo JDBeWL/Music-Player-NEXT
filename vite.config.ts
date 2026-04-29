@@ -16,6 +16,20 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    target: "esnext",
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (/vue|vue-router|pinia/.test(id)) return 'vue';
+            if (/@ffmpeg/.test(id)) return 'ffmpeg';
+          }
+        },
+      },
+    },
+  },
+
   clearScreen: false,
   server: {
     port: 1420,
@@ -33,7 +47,7 @@ export default defineConfig(async () => ({
     },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
+      "Cross-Origin-Embedder-Policy": "credentialless",
     },
   },
   optimizeDeps: {

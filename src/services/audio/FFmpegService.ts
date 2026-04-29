@@ -1,13 +1,4 @@
-export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
-
-export interface AudioTrack {
-  id: string;
-  path: string;
-  title: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-}
+import type { AudioTrack, PlaybackState } from '@/types';
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type ProgressCallback = (currentTime: number, duration: number) => void;
@@ -93,6 +84,7 @@ class FFmpegAudioService {
 
       this.audioContext = new AudioContext();
       this.gainNode = this.audioContext.createGain();
+      this.gainNode.gain.value = 0.5;
       this.gainNode.connect(this.audioContext.destination);
 
       this.isInitialized = true;
@@ -232,13 +224,9 @@ class FFmpegAudioService {
       // 判断是否需要 FFmpeg 转码
       if (this.needsFFmpegConversion(extension)) {
         const convertedData = await this.convertAudioInWorker(audioData, extension, `preload_${track.id}`);
-        const blob = new Blob([new Uint8Array(convertedData.buffer as ArrayBuffer)], { type: 'audio/wav' });
-        arrayBuffer = await blob.arrayBuffer();
+        arrayBuffer = convertedData.buffer as ArrayBuffer;
       } else {
-        // 原生支持的格式直接解码
-        const mimeType = this.getMimeType(extension);
-        const blob = new Blob([new Uint8Array(audioData.buffer as ArrayBuffer)], { type: mimeType });
-        arrayBuffer = await blob.arrayBuffer();
+        arrayBuffer = audioData.buffer as ArrayBuffer;
       }
 
       if (!this.audioContext) {
@@ -258,18 +246,6 @@ class FFmpegAudioService {
     // 只有这些格式需要 FFmpeg 转码
     const needsConversion = ['ape', 'wma', 'tak', 'tta'];
     return needsConversion.includes(extension);
-  }
-
-  private getMimeType(extension: string): string {
-    const mimeTypes: Record<string, string> = {
-      'mp3': 'audio/mpeg',
-      'flac': 'audio/flac',
-      'wav': 'audio/wav',
-      'ogg': 'audio/ogg',
-      'm4a': 'audio/mp4',
-      'aac': 'audio/aac',
-    };
-    return mimeTypes[extension] || 'audio/mpeg';
   }
 
   async load(track: AudioTrack, audioData: Uint8Array): Promise<void> {
@@ -299,13 +275,10 @@ class FFmpegAudioService {
       if (this.needsFFmpegConversion(extension)) {
         console.log('[FFmpeg] Converting in worker:', extension);
         const convertedData = await this.convertAudioInWorker(audioData, extension, track.id);
-        const blob = new Blob([new Uint8Array(convertedData.buffer as ArrayBuffer)], { type: 'audio/wav' });
-        arrayBuffer = await blob.arrayBuffer();
+        arrayBuffer = convertedData.buffer as ArrayBuffer;
       } else {
         console.log('[FFmpeg] Native decoding:', extension);
-        const mimeType = this.getMimeType(extension);
-        const blob = new Blob([new Uint8Array(audioData.buffer as ArrayBuffer)], { type: mimeType });
-        arrayBuffer = await blob.arrayBuffer();
+        arrayBuffer = audioData.buffer as ArrayBuffer;
       }
 
       if (!this.audioContext) {
@@ -355,14 +328,10 @@ class FFmpegAudioService {
       if (this.needsFFmpegConversion(extension)) {
         console.log('[FFmpeg] Converting in worker:', extension);
         const convertedData = await this.convertAudioInWorker(audioData, extension, track.id);
-        const blob = new Blob([new Uint8Array(convertedData.buffer as ArrayBuffer)], { type: 'audio/wav' });
-        arrayBuffer = await blob.arrayBuffer();
+        arrayBuffer = convertedData.buffer as ArrayBuffer;
       } else {
         console.log('[FFmpeg] Native decoding:', extension);
-        // 原生支持的格式直接解码，不走 FFmpeg
-        const mimeType = this.getMimeType(extension);
-        const blob = new Blob([new Uint8Array(audioData.buffer as ArrayBuffer)], { type: mimeType });
-        arrayBuffer = await blob.arrayBuffer();
+        arrayBuffer = audioData.buffer as ArrayBuffer;
       }
 
       console.log('[FFmpeg] Decoding audio data...');
@@ -484,7 +453,7 @@ class FFmpegAudioService {
       this.progressListeners.forEach(cb => {
         cb(this.getCurrentTime(), this.getDuration());
       });
-    }, 100);
+    }, 250);
   }
 
   private stopProgressTracking(): void {

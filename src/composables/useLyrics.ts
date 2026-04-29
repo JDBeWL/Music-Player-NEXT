@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue';
-import { usePlayerStore } from '@/stores/playerStore';
+import { usePlaybackStore } from '@/stores/playbackStore';
+import { useLibraryStore } from '@/stores/libraryStore';
 import { LyricsParser } from '@/utils/lyricsParser';
 import type { KaraokeWord } from '@/types';
 
@@ -11,28 +12,23 @@ interface EnhancedLyricLine {
 }
 
 export function useLyrics() {
-  const playerStore = usePlayerStore();
+  const playbackStore = usePlaybackStore();
+  const libraryStore = useLibraryStore();
   const lyrics = ref<EnhancedLyricLine[]>([]);
   const loading = ref(false);
   const lyricsSource = ref<'local' | 'online' | null>(null);
 
-  // 解析歌词并转换为增强格式（支持 LRC、ASS、SRT）
   const parseLyrics = async (lyricsText: string): Promise<EnhancedLyricLine[]> => {
     if (!lyricsText) return [];
 
     try {
-      // 使用异步解析器，支持卡拉OK和双语
       const parsed = await LyricsParser.parseAsync(lyricsText, 'auto');
 
-      // 转换为增强格式
       return parsed.map(line => {
-        // 处理 texts 字段
         let texts: string[];
         if (line.texts && line.texts.length > 0) {
-          // 已经有 texts 数组（来自 ASS 双语）
           texts = line.texts.filter(Boolean);
         } else if (line.text) {
-          // 只有单个 text（来自 LRC 或简单 ASS）
           texts = [line.text];
         } else {
           texts = [''];
@@ -51,9 +47,8 @@ export function useLyrics() {
     }
   };
 
-  // 监听当前曲目变化，加载歌词
   watch(
-    () => playerStore.currentTrack,
+    () => playbackStore.currentTrack,
     async (track) => {
       if (!track) {
         lyrics.value = [];
@@ -64,8 +59,14 @@ export function useLyrics() {
       loading.value = true;
 
       try {
-        if (track.lrc) {
-          lyrics.value = await parseLyrics(track.lrc);
+        let lrcText = track.lrc;
+
+        if (!lrcText && !track.id.startsWith('netease_')) {
+          lrcText = await libraryStore.loadLyrics(track) ?? undefined;
+        }
+
+        if (lrcText) {
+          lyrics.value = await parseLyrics(lrcText);
           lyricsSource.value = 'local';
         } else {
           lyrics.value = [];
@@ -82,7 +83,6 @@ export function useLyrics() {
     { immediate: true }
   );
 
-  // 清理函数
   const cleanup = () => {
     lyrics.value = [];
     lyricsSource.value = null;

@@ -51,8 +51,8 @@ function toggleCollapse() {
       <Transition name="fade-text">
         <span v-if="!isCollapsed" class="sidebar-title">Mercurial Player NEXT</span>
       </Transition>
-      <button class="collapse-btn" @click="toggleCollapse" :title="isCollapsed ? '展开侧边栏' : '收起侧边栏'" aria-label="侧边栏折叠">
-        <component :is="isCollapsed ? PanelLeftOpen : PanelLeftClose" :size="18" />
+      <button class="collapse-btn md3-icon-btn-sm state-layer" @click="toggleCollapse" :title="isCollapsed ? '展开侧边栏' : '收起侧边栏'" aria-label="侧边栏折叠">
+        <component :is="isCollapsed ? PanelLeftOpen : PanelLeftClose" :size="20" />
       </button>
     </div>
 
@@ -100,12 +100,12 @@ function toggleCollapse() {
         <span v-if="!isCollapsed" class="playlist-label">播放列表</span>
       </Transition>
       <button
-        class="playlist-add-btn state-layer"
+        class="playlist-add-btn md3-icon-btn-sm state-layer"
         @click="emit('request-create')"
         :title="isCollapsed ? '创建播放列表' : undefined"
         aria-label="创建播放列表"
       >
-        <Plus :size="16" />
+        <Plus :size="18" />
       </button>
     </div>
 
@@ -145,8 +145,10 @@ function toggleCollapse() {
 <style scoped>
 .sidebar-container {
   width: 260px;
-  background: var(--elevation-1-bg);
-  border-right: 1px solid var(--elevation-1-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -187,17 +189,6 @@ function toggleCollapse() {
 }
 
 .collapse-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all 0.15s;
   flex-shrink: 0;
 }
 
@@ -248,6 +239,11 @@ function toggleCollapse() {
   color: var(--text-primary);
 }
 
+.nav-item svg {
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+}
+
 .nav-active {
   background: var(--color-primary-container);
   color: var(--color-on-primary-container);
@@ -288,17 +284,6 @@ function toggleCollapse() {
 }
 
 .playlist-add-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all 0.15s;
   flex-shrink: 0;
 }
 
@@ -340,6 +325,11 @@ function toggleCollapse() {
   color: var(--text-primary);
 }
 
+.playlist-item svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
 .playlist-active {
   background: var(--color-primary-container);
   color: var(--color-on-primary-container);
@@ -370,6 +360,11 @@ function toggleCollapse() {
 
 .playlist-delete-btn:hover {
   color: #f87171;
+}
+
+.playlist-delete-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .playlist-empty {

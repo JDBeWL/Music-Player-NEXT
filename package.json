@@ -1,7 +1,7 @@
 {
   "name": "music-player-next",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -14,17 +14,17 @@
     "@ffmpeg/core": "0.12.6",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@material/material-color-utilities": "^0.4.0",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@vueuse/core": "^14.2.1",
     "@vueuse/motion": "^3.0.3",
-    "colorthief": "^3.3.1",
     "lucide-vue-next": "^1.0.0",
-    "music-metadata": "^11.12.3",
     "pinia": "^3.0.4",
     "radix-vue": "^1.9.17",
-    "vue": "^3.5.32"
+    "vue": "^3.5.32",
+    "vue-router": "4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",

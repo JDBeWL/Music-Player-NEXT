@@ -13,7 +13,8 @@ import {
 } from 'lucide-vue-next';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import type { AudioTrack } from '@/stores/playerStore';
+import { getCoverUrl } from '@/utils/coverUrl'; // 引入封面工具
+import type { AudioTrack } from '@/types';
 
 interface Props {
   currentView: string;
@@ -160,14 +161,17 @@ function onBlur() {
           </button>
         </div>
 
-        <div v-if="showSearchResults && searchResults.length > 0" class="search-results elevation-2">
+        <div v-if="showSearchResults && searchResults.length > 0" class="search-results">
           <div
             v-for="track in searchResults.slice(0, 8)"
             :key="track.id"
             class="search-result-item"
             @mousedown.prevent="playAsNext(track)"
           >
-            <Music :size="14" class="result-icon" />
+            <div class="result-cover">
+              <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="" class="cover-img" />
+              <Music v-else :size="14" class="result-icon" />
+            </div>
             <div class="result-info">
               <span class="result-title">{{ track.title }}</span>
               <span class="result-artist">{{ track.artist }}</span>
@@ -202,9 +206,10 @@ function onBlur() {
   align-items: center;
   justify-content: space-between;
   height: 48px;
-  background-color: var(--bg-secondary);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--glass-bg);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
   user-select: none;
   z-index: 100;
@@ -241,6 +246,11 @@ function onBlur() {
   cursor: not-allowed;
 }
 
+.nav-btn svg {
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
+}
+
 .titlebar-center {
   flex: 1;
   display: flex;
@@ -261,7 +271,7 @@ function onBlur() {
   gap: 8px;
   height: 38px;
   padding: 0 14px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm); /* 改为 radius-sm */
   background: var(--bg-tertiary);
   border: 1px solid transparent;
   transition: all 0.2s ease;
@@ -275,8 +285,8 @@ function onBlur() {
 .search-icon {
   color: var(--text-tertiary);
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
 }
 
 .search-input {
@@ -298,8 +308,8 @@ function onBlur() {
 .search-loading {
   color: var(--color-primary);
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
 }
 
 .search-clear {
@@ -318,49 +328,87 @@ function onBlur() {
   transition: color 0.15s;
 }
 
+.search-clear svg {
+  width: 12px;
+  height: 12px;
+}
+
 .search-clear:hover {
   color: var(--text-secondary);
 }
 
 .search-results {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 8px);
   left: 0;
   right: 0;
-  max-height: 320px;
+  max-height: 380px;
   overflow-y: auto;
-  border-radius: var(--radius-lg);
-  backdrop-filter: blur(24px);
+  border-radius: var(--radius-sm); /* 改为 radius-sm */
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-xl);
   z-index: 200;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  padding: 4px;
 }
 
 .search-results::-webkit-scrollbar {
-  width: 5px;
+  width: 8px;
 }
 
 .search-results::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 3px;
+  background-color: rgba(155, 155, 155, 0.4);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 10px;
+}
+
+.search-results::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-primary);
 }
 
 .search-result-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
+  gap: 12px;
+  padding: 10px 12px;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: all 0.2s ease;
+  border-radius: var(--radius-sm);
+  margin-bottom: 2px;
+}
+
+.search-result-item:last-child {
+  margin-bottom: 0;
 }
 
 .search-result-item:hover {
   background: var(--hover-overlay);
 }
 
+.result-cover {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .result-icon {
   color: var(--text-tertiary);
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
 }
 
 .result-info {
@@ -437,6 +485,11 @@ function onBlur() {
 .window-btn:hover {
   background: var(--hover-overlay);
   color: var(--text-primary);
+}
+
+.window-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .window-btn-close:hover {

@@ -1,52 +1,43 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { Play, Edit, Music, Heart, Trash2, ArrowUpDown, ArrowUp, ArrowDown, GripVertical } from 'lucide-vue-next';
-import { getCoverUrl } from '../stores/playerStore';
+import { getCoverUrl } from '@/utils/coverUrl';
+import { usePlaybackStore } from '@/stores/playbackStore';
+import { usePlaylistStore } from '@/stores/playlistStore';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { saveLibraryToBackend } from '@/services/persistence/libraryPersistence';
+import type { AudioTrack } from '@/types';
 
-interface Track {
-  id: string;
-  path: string;
-  title: string;
-  artist: string;
-  album: string;
-  duration: number;
-  coverUrl?: string;
+const route = useRoute();
+const playbackStore = usePlaybackStore();
+const playlistStore = usePlaylistStore();
+const libraryStore = useLibraryStore();
+
+async function persistLibrary() {
+  try {
+    await saveLibraryToBackend(
+      libraryStore.libraryFolders,
+      playlistStore.playlists,
+      libraryStore.libraryTracks,
+      libraryStore.scanDepth
+    );
+  } catch (error) {
+    console.error('[PlaylistDetailPage] Failed to persist library:', error);
+  }
 }
 
-interface Playlist {
-  id: string;
-  name: string;
-  description?: string;
-  coverUrl?: string;
-  tracks: Track[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface Props {
-  playlist: Playlist;
-  favoriteTrackPaths: string[];
-  currentTrackId?: string;
-  isPlaying?: boolean;
-}
-
-interface Emits {
-  (e: 'play-playlist'): void;
-  (e: 'play-track', trackId: string): void;
-  (e: 'update-description', description: string): void;
-  (e: 'remove-track', trackId: string): void;
-  (e: 'toggle-favorite', track: Track): void;
-  (e: 'reorder-tracks', fromIndex: number, toIndex: number): void;
-}
+const playlistId = computed(() => route.params.id as string);
+const playlist = computed(() => playlistStore.playlists.find(p => p.id === playlistId.value)!);
+const currentTrackId = computed(() => playbackStore.currentTrack?.id);
+const isPlaying = computed(() => playbackStore.isPlaying);
+const favoriteTrackPaths = computed(() => playlistStore.favoritePlaylist?.tracks.map(t => t.path) ?? []);
 
 type SortKey = 'default' | 'title' | 'artist' | 'album' | 'duration';
 type SortOrder = 'asc' | 'desc';
 
-const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
-
 const isEditingDescription = ref(false);
-const descriptionText = ref(props.playlist.description || '');
+const descriptionText = ref('');
 const showSortMenu = ref(false);
 const sortKey = ref<SortKey>('default');
 const sortOrder = ref<SortOrder>('asc');
@@ -66,29 +57,18 @@ const sortOptions: { key: SortKey; label: string }[] = [
 ];
 
 const sortedTracks = computed(() => {
+  const pl = playlist.value;
+  if (!pl) return [];
   if (sortKey.value !== 'default') {
-    return [...props.playlist.tracks].sort((a, b) => {
+    return [...pl.tracks].sort((a, b) => {
       let aVal: string | number;
       let bVal: string | number;
       switch (sortKey.value) {
-        case 'title':
-          aVal = a.title.toLowerCase();
-          bVal = b.title.toLowerCase();
-          break;
-        case 'artist':
-          aVal = a.artist.toLowerCase();
-          bVal = b.artist.toLowerCase();
-          break;
-        case 'album':
-          aVal = a.album.toLowerCase();
-          bVal = b.album.toLowerCase();
-          break;
-        case 'duration':
-          aVal = a.duration;
-          bVal = b.duration;
-          break;
-        default:
-          return 0;
+        case 'title': aVal = a.title.toLowerCase(); bVal = b.title.toLowerCase(); break;
+        case 'artist': aVal = a.artist.toLowerCase(); bVal = b.artist.toLowerCase(); break;
+        case 'album': aVal = a.album.toLowerCase(); bVal = b.album.toLowerCase(); break;
+        case 'duration': aVal = a.duration; bVal = b.duration; break;
+        default: return 0;
       }
       if (aVal < bVal) return sortOrder.value === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortOrder.value === 'asc' ? 1 : -1;
@@ -96,25 +76,19 @@ const sortedTracks = computed(() => {
     });
   }
   if (isDragging.value && draggedIndex.value !== null && dragOverIndex.value !== null) {
-    const tracks = [...props.playlist.tracks];
+    const tracks = [...pl.tracks];
     const [removed] = tracks.splice(draggedIndex.value, 1);
     tracks.splice(dragOverIndex.value, 0, removed);
     return tracks;
   }
-  return props.playlist.tracks;
+  return pl.tracks;
 });
 
-function toggleSortMenu() {
-  showSortMenu.value = !showSortMenu.value;
-}
+function toggleSortMenu() { showSortMenu.value = !showSortMenu.value; }
 
 function selectSort(key: SortKey) {
-  if (sortKey.value === key) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
-  } else {
-    sortKey.value = key;
-    sortOrder.value = 'asc';
-  }
+  if (sortKey.value === key) { sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'; }
+  else { sortKey.value = key; sortOrder.value = 'asc'; }
   showSortMenu.value = false;
 }
 
@@ -124,10 +98,7 @@ function getSortIcon(key: SortKey) {
 }
 
 function closeSortMenu(e: MouseEvent) {
-  const target = e.target as HTMLElement;
-  if (!target.closest('.sort-dropdown')) {
-    showSortMenu.value = false;
-  }
+  if (!(e.target as HTMLElement).closest('.sort-dropdown')) showSortMenu.value = false;
 }
 
 onMounted(() => {
@@ -148,39 +119,32 @@ function handleGripMouseDown(e: MouseEvent, index: number) {
   e.stopPropagation();
   isDragging.value = true;
   draggedIndex.value = index;
-  draggedTrackId.value = props.playlist.tracks[index]?.id || null;
+  draggedTrackId.value = playlist.value?.tracks[index]?.id || null;
   dragStartY.value = e.clientY;
 }
 
 function handleMouseMove(e: MouseEvent) {
   if (!isDragging.value || draggedIndex.value === null) return;
-
   const trackElements = document.querySelectorAll('.track-item');
   let closestIndex = -1;
   let minDistance = Infinity;
-
   trackElements.forEach((el, i) => {
     const rect = el.getBoundingClientRect();
     const elementCenterY = rect.top + rect.height / 2;
     const distance = Math.abs(e.clientY - elementCenterY);
-    if (distance < minDistance) {
-      minDistance = distance;
-      closestIndex = i;
-    }
+    if (distance < minDistance) { minDistance = distance; closestIndex = i; }
   });
-
-  if (closestIndex !== -1) {
-    dragOverIndex.value = closestIndex;
-  }
+  if (closestIndex !== -1) dragOverIndex.value = closestIndex;
 }
 
-function handleMouseUp(e: MouseEvent) {
+async function handleMouseUp(e: MouseEvent) {
   if (!isDragging.value) return;
   const dragDistance = Math.abs(e.clientY - dragStartY.value);
   const fromIndex = draggedIndex.value;
   const toIndex = dragOverIndex.value;
   if (dragDistance >= DRAG_THRESHOLD && fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
-    emit('reorder-tracks', fromIndex, toIndex);
+    if (playlistId.value) playlistStore.reorderPlaylistTracks(playlistId.value, fromIndex, toIndex);
+    await persistLibrary();
   }
   isDragging.value = false;
   draggedIndex.value = null;
@@ -189,18 +153,16 @@ function handleMouseUp(e: MouseEvent) {
 }
 
 const playlistCover = computed(() => {
-  if (props.playlist.coverUrl) {
-    return getCoverUrl(props.playlist.coverUrl);
-  }
-  if (props.playlist.tracks.length > 0 && props.playlist.tracks[0].coverUrl) {
-    return getCoverUrl(props.playlist.tracks[0].coverUrl);
-  }
+  const pl = playlist.value;
+  if (!pl) return undefined;
+  if (pl.coverUrl) return getCoverUrl(pl.coverUrl);
+  if (pl.tracks.length > 0 && pl.tracks[0].coverUrl) return getCoverUrl(pl.tracks[0].coverUrl);
   return undefined;
 });
 
-watch(() => props.playlist.description, (newDesc) => {
+watch(() => playlist.value?.description, (newDesc) => {
   descriptionText.value = newDesc || '';
-});
+}, { immediate: true });
 
 function formatTime(seconds: number): string {
   if (!seconds || isNaN(seconds)) return '0:00';
@@ -209,27 +171,44 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function startEditDescription() {
-  isEditingDescription.value = true;
-}
+function startEditDescription() { isEditingDescription.value = true; }
 
-function saveDescription() {
-  emit('update-description', descriptionText.value);
+async function saveDescription() {
+  if (playlistId.value) playlistStore.updatePlaylistDescription(playlistId.value, descriptionText.value);
   isEditingDescription.value = false;
+  await persistLibrary();
 }
 
 function cancelEditDescription() {
-  descriptionText.value = props.playlist.description || '';
+  descriptionText.value = playlist.value?.description || '';
   isEditingDescription.value = false;
 }
 
 function isTrackFavorite(trackPath: string): boolean {
-  return props.favoriteTrackPaths.includes(trackPath);
+  return favoriteTrackPaths.value.includes(trackPath);
+}
+
+function playPlaylist() {
+  if (playlist.value) playbackStore.loadPlaylistToQueue(playlist.value.tracks, playlistId.value);
+}
+
+function playTrack(trackId: string) {
+  if (playlist.value) playbackStore.playTrackFromPlaylist(playlist.value.tracks, playlistId.value, trackId);
+}
+
+async function toggleFavorite(track: AudioTrack) {
+  playlistStore.toggleFavorite(track);
+  await persistLibrary();
+}
+
+async function removeTrack(trackId: string) {
+  if (playlistId.value) playlistStore.removeFromPlaylist(playlistId.value, trackId);
+  await persistLibrary();
 }
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col overflow-hidden">
+  <div v-if="playlist" class="flex-1 flex flex-col overflow-hidden">
     <div class="flex-1 overflow-y-auto px-8 py-8">
       <div class="max-w-5xl mx-auto">
         <div class="flex gap-8 mb-8">
@@ -267,7 +246,7 @@ function isTrackFavorite(trackPath: string): boolean {
               </div>
             </div>
 
-            <button class="md3-btn-filled flex items-center gap-2 w-fit no-select" @click="emit('play-playlist')">
+            <button class="md3-btn-filled w-fit no-select" @click="playPlaylist">
               <Play :size="18" />
               播放全部
             </button>
@@ -279,7 +258,7 @@ function isTrackFavorite(trackPath: string): boolean {
             <h3 class="text-xl font-semibold text-[var(--text-primary)] no-select">歌曲列表</h3>
             <div class="relative sort-dropdown no-select">
               <button
-                class="md3-chip flex items-center gap-2 no-select"
+                class="md3-chip no-select min-w-[150px]"
                 @click="toggleSortMenu"
               >
                 <component :is="getSortIcon(sortKey)" :size="16" />
@@ -287,12 +266,12 @@ function isTrackFavorite(trackPath: string): boolean {
               </button>
               <div
                 v-if="showSortMenu"
-                class="absolute right-0 top-full mt-2 p-2 elevation-3 rounded-2xl min-w-[160px] z-10"
+                class="absolute right-0 top-full mt-2 p-2 elevation-3 rounded-2xl min-w-[150px] z-10"
               >
                 <button
                   v-for="option in sortOptions"
                   :key="option.key"
-                  class="w-full px-3 py-2.5 text-left text-sm flex items-center justify-between rounded-xl transition-colors"
+                  class="w-full mt-1 px-3 py-2.5 text-left text-sm flex items-center justify-between rounded-xl transition-colors"
                   :class="sortKey === option.key ? 'text-[var(--color-primary)] bg-[var(--color-primary-container)]' : 'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)]'"
                   @click="selectSort(option.key)"
                 >
@@ -315,12 +294,12 @@ function isTrackFavorite(trackPath: string): boolean {
             <div
               v-for="(track, trackIndex) in sortedTracks"
               :key="track.id"
-              class="track-item flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-150 group no-select relative state-layer"
+              class="track-item flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-150 group no-select relative state-layer cursor-pointer"
               :class="[
                 isDragging && track.id === draggedTrackId ? 'opacity-50 scale-[0.98] elevation-2 z-10' : '',
                 !isDragging && track.id === currentTrackId ? 'bg-[var(--color-primary-container)]' : ''
               ]"
-              @click="!isDragging && emit('play-track', track.id)"
+              @dblclick="!isDragging && playTrack(track.id)"
             >
               <div class="w-8 h-8 flex items-center justify-center">
                 <span v-if="track.id !== currentTrackId || !isPlaying" class="text-[var(--text-tertiary)] font-medium">{{ trackIndex + 1 }}</span>
@@ -347,20 +326,24 @@ function isTrackFavorite(trackPath: string): boolean {
                 <div class="text-[var(--text-primary)] font-medium truncate" :class="{ 'text-[var(--color-primary)]': track.id === currentTrackId }">{{ track.title }}</div>
                 <div class="text-[var(--text-tertiary)] text-sm truncate">{{ track.artist }}</div>
               </div>
-              <div class="text-[var(--text-tertiary)] text-sm">{{ formatTime(track.duration) }}</div>
-              <button
-                class="md3-icon-btn-sm opacity-0 group-hover:opacity-100"
-                :class="isTrackFavorite(track.path) ? 'text-red-400' : 'text-[var(--text-tertiary)]'"
-                @click.stop="emit('toggle-favorite', track)"
-              >
-                <Heart :size="16" :fill="isTrackFavorite(track.path) ? 'currentColor' : 'none'" />
-              </button>
-              <button
-                class="md3-icon-btn-sm opacity-0 group-hover:opacity-100 text-[var(--text-tertiary)] hover:text-red-400"
-                @click.stop="emit('remove-track', track.id)"
-              >
-                <Trash2 :size="16" />
-              </button>
+              <div class="track-actions">
+                <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
+                <div class="track-action-btns opacity-0 group-hover:opacity-100">
+                  <button
+                    class="md3-icon-btn-xs state-layer"
+                    :class="isTrackFavorite(track.path) ? 'text-red-400' : ''"
+                    @click.stop="toggleFavorite(track)"
+                  >
+                    <Heart :size="16" :fill="isTrackFavorite(track.path) ? 'currentColor' : 'none'" />
+                  </button>
+                  <button
+                    class="md3-icon-btn-xs state-layer text-[var(--text-tertiary)] hover:text-red-400"
+                    @click.stop="removeTrack(track.id)"
+                  >
+                    <Trash2 :size="16" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -370,4 +353,29 @@ function isTrackFavorite(trackPath: string): boolean {
 </template>
 
 <style scoped>
+.track-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.track-time {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.track-action-btns {
+  position: absolute;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transition: opacity 0.15s ease;
+}
 </style>

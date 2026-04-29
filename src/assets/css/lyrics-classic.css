@@ -1,42 +1,45 @@
-.lyrics-style-classic .lyrics {
-    margin: 6px 0;
-    padding: 12px 20px 12px 12px;
-    font-size: 24px;
-    color: #64748b;
-    filter: blur(var(--lyrics-blur-amount, 2px));
-    opacity: var(--lyrics-inactive-opacity, 0.6);
-    transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-        color 0.25s ease,
-        background-color 0.25s ease,
-        margin 0.25s ease-in-out,
-        font-size 0.15s ease-in-out,
-        filter 0.25s ease,
-        opacity 0.25s ease;
-    word-break: break-word;
-    min-height: 1em;
-    cursor: pointer;
-    border-radius: 8px;
-    transform-origin: var(--align-origin, left center);
-    will-change: transform, font-size;
-    user-select: none;
-}
-
-.lyrics-style-classic .lyrics:hover {
-    background-color: #f1f5f9;
-}
-
-.lyrics-style-classic .lyrics.active {
-    font-size: 32px;
-    font-weight: bold;
-    transform: scale(1.01);
-    color: #0ea5e9;
-    filter: blur(0px);
-    opacity: 1;
-}
-
 .lyrics-style-classic .lyrics-display {
     mask-image: none;
     -webkit-mask-image: none;
+}
+
+.lyrics-style-classic .lyrics {
+    margin: 4px 0;
+    padding: 10px 20px;
+    font-size: 22px;
+    color: #64748b;
+    cursor: pointer;
+    user-select: none;
+    word-break: break-word;
+    min-height: 1em;
+    border-radius: 8px;
+    transition:
+        color 0.2s ease,
+        font-size 0.2s ease,
+        font-weight 0.2s ease,
+        opacity 0.2s ease;
+}
+
+.lyrics-style-classic .lyrics:hover {
+    background-color: rgba(100, 116, 139, 0.06);
+}
+
+.lyrics-style-classic .lyrics.active {
+    font-size: 28px;
+    font-weight: 700;
+    color: #0ea5e9;
+    opacity: 1 !important;
+}
+
+.lyrics-style-classic .first-line {
+    line-height: 1.5;
+}
+
+.lyrics-style-classic .translation {
+    font-size: 20px;
+    font-weight: 400;
+    opacity: 0.65;
+    margin-top: 2px;
 }
 
 /* 经典模式卡拉OK */

@@ -55,22 +55,22 @@
   --elevation-0-tint: transparent;
 
   /* Elevation 1: 底层表面 (Sidebar, 底部面板) */
-  --elevation-1-bg: rgba(18, 18, 18, 0.95);
+  --elevation-1-bg: rgba(35, 35, 35, 0.95);
   --elevation-1-border: rgba(255, 255, 255, 0.05);
   --elevation-1-tint: rgba(255, 255, 255, 0.03);
 
   /* Elevation 2: 中层表面 (卡片, 弹出菜单) */
-  --elevation-2-bg: rgba(28, 28, 28, 0.95);
+  --elevation-2-bg: rgba(45, 45, 45, 0.95);
   --elevation-2-border: rgba(255, 255, 255, 0.08);
   --elevation-2-tint: rgba(255, 255, 255, 0.05);
 
   /* Elevation 3: 上层表面 (模态框, 抽屉) */
-  --elevation-3-bg: rgba(38, 38, 38, 0.98);
+  --elevation-3-bg: rgba(55, 55, 55, 0.98);
   --elevation-3-border: rgba(255, 255, 255, 0.1);
   --elevation-3-tint: rgba(255, 255, 255, 0.08);
 
   /* Elevation 4: 最高层 (FAB, 弹出提示) */
-  --elevation-4-bg: rgba(48, 48, 48, 0.99);
+  --elevation-4-bg: rgba(65, 65, 65, 0.99);
   --elevation-4-border: rgba(255, 255, 255, 0.12);
   --elevation-4-tint: rgba(255, 255, 255, 0.1);
 
@@ -123,6 +123,7 @@
   --icon-size-xl: 28px;
   --icon-size-2xl: 32px;
   --icon-size-3xl: 40px;
+  --icon-stroke-width: 2;
 
   /* === MD3 Scrim === */
   --scrim: rgba(0, 0, 0, 0.6);
@@ -130,11 +131,11 @@
   /* ============================================
      暗色模式变量 (默认)
   ============================================ */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #121212;
-  --bg-tertiary: #1a1a1a;
-  --bg-surface: rgba(28, 28, 28, 0.95);
-  --bg-surface-variant: rgba(38, 38, 38, 0.9);
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #242424;
+  --bg-tertiary: #2e2e2e;
+  --bg-surface: rgba(45, 45, 45, 0.95);
+  --bg-surface-variant: rgba(55, 55, 55, 0.9);
 
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.8);
@@ -154,7 +155,7 @@
 
   /* 组件特定 */
   --btn-primary-bg: var(--color-primary);
-  --btn-primary-text: var(--text-on-primary);
+  --btn-primary-text: #ffffff;
   --btn-secondary-bg: rgba(255, 255, 255, 0.1);
   --btn-secondary-text: var(--text-primary);
   --btn-tertiary-bg: transparent;
@@ -178,9 +179,10 @@
   --scrollbar-thumb-active: var(--color-primary);
 
   /* 毛玻璃效果 */
-  --glass-bg: rgba(28, 28, 28, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-blur: blur(24px);
+  --glass-bg: rgba(28, 28, 28, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: blur(40px);
+  --glass-saturate: saturate(1.8);
 
   /* 阴影 (保留用于特定效果，MD3 主要用 elevation) */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -198,6 +200,10 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  svg {
+    flex-shrink: 0;
   }
 
   .no-select {
@@ -261,8 +267,10 @@
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
   --scrollbar-thumb-active: var(--color-primary);
 
-  --glass-bg: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(0, 0, 0, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-blur: blur(40px);
+  --glass-saturate: saturate(1.8);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
   --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.15);
@@ -320,13 +328,17 @@
     border-color: var(--border-strong);
   }
 
-  /* === MD3 按钮 === */
-  .md3-btn-filled {
-    @apply font-medium rounded-full px-6 py-3 transition-all duration-200;
-    background: var(--btn-primary-bg);
-    color: var(--btn-primary-text);
+  /* === MD3 按钮基础 === */
+  .md3-btn {
+    @apply inline-flex items-center justify-center gap-2 font-medium rounded-full transition-all duration-200;
     min-height: 40px;
     min-width: 64px;
+  }
+
+  .md3-btn-filled {
+    @apply md3-btn px-6 py-3;
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
   }
 
   .md3-btn-filled:hover {
@@ -343,11 +355,9 @@
   }
 
   .md3-btn-filled-tonal {
-    @apply font-medium rounded-full px-6 py-3 transition-all duration-200;
+    @apply md3-btn px-6 py-3;
     background: var(--color-primary-container);
     color: var(--color-on-primary-container);
-    min-height: 40px;
-    min-width: 64px;
   }
 
   .md3-btn-filled-tonal:hover {
@@ -355,12 +365,10 @@
   }
 
   .md3-btn-outlined {
-    @apply font-medium rounded-full px-6 py-3 transition-all duration-200 border;
+    @apply md3-btn px-6 py-3 border;
     background: transparent;
     border-color: var(--border-default);
     color: var(--text-primary);
-    min-height: 40px;
-    min-width: 64px;
   }
 
   .md3-btn-outlined:hover {
@@ -369,10 +377,9 @@
   }
 
   .md3-btn-text {
-    @apply font-medium rounded-full px-4 py-2 transition-all duration-200;
+    @apply md3-btn px-4 py-2;
     background: transparent;
     color: var(--color-primary);
-    min-height: 40px;
   }
 
   .md3-btn-text:hover {
@@ -401,9 +408,10 @@
 
   /* === MD3 Icon Button === */
   .md3-icon-btn {
-    @apply flex items-center justify-center rounded-full transition-all duration-200;
+    @apply flex items-center justify-center transition-all duration-200;
     width: 48px;
     height: 48px;
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
   }
 
@@ -427,10 +435,56 @@
   }
 
   .md3-icon-btn-sm {
-    @apply flex items-center justify-center rounded-full transition-all duration-200;
+    @apply flex items-center justify-center transition-all duration-200;
     width: 40px;
     height: 40px;
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
+  }
+
+  .md3-icon-btn-xs {
+    @apply flex items-center justify-center transition-all duration-200;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+
+  .md3-icon-btn-sm:hover,
+  .md3-icon-btn-xs:hover {
+    background: var(--hover-overlay);
+    color: var(--text-primary);
+  }
+
+  .md3-icon-btn-sm:active,
+  .md3-icon-btn-xs:active {
+    background: var(--pressed-overlay);
+  }
+
+  .md3-icon-btn-sm:disabled,
+  .md3-icon-btn-xs:disabled {
+    color: var(--text-disabled);
+    cursor: not-allowed;
+  }
+
+  .md3-icon-btn svg {
+    width: var(--icon-size-md);
+    height: var(--icon-size-md);
+  }
+
+  .md3-icon-btn-sm svg {
+    width: var(--icon-size-md);
+    height: var(--icon-size-md);
+  }
+
+  .md3-icon-btn-xs svg {
+    width: var(--icon-size-sm);
+    height: var(--icon-size-sm);
+  }
+
+  .md3-icon-btn-lg svg {
+    width: var(--icon-size-lg);
+    height: var(--icon-size-lg);
   }
 
   /* === MD3 State Layer (状态层覆盖) === */
@@ -482,12 +536,12 @@
 
   /* === Chip (MD3 Filter Chip) === */
   .md3-chip {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full border transition-all duration-200 cursor-pointer;
-    min-height: 40px;
+    @apply md3-btn px-5 py-3 border;
     background: transparent;
     border-color: var(--border-default);
     color: var(--text-secondary);
     font-size: 14px;
+    cursor: pointer;
   }
 
   .md3-chip:hover {
@@ -500,9 +554,47 @@
     color: var(--color-on-primary-container);
   }
 
+  /* === MD3 Switch === */
+  .md3-switch {
+    position: relative;
+    width: 52px;
+    height: 32px;
+    border-radius: 16px;
+    border: 2px solid var(--text-disabled);
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .md3-switch-thumb {
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-disabled);
+    transition: all 0.2s ease;
+  }
+
+  .md3-switch-active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+
+  .md3-switch-active .md3-switch-thumb {
+    left: calc(100% - 22px);
+    width: 24px;
+    height: 24px;
+    background: var(--color-on-primary);
+  }
+
   /* === MD3 Text Field === */
   .md3-text-field {
-    @apply w-full px-4 py-3 rounded-xl border transition-all duration-200 outline-none;
+    @apply w-full px-4 py-3 rounded-sm border transition-all duration-200 outline-none;
     background: var(--input-bg);
     border-color: var(--input-border);
     color: var(--input-text);
@@ -677,6 +769,14 @@
     justify-content: space-between;
   }
 
+  .icon-xs svg { width: var(--icon-size-xs); height: var(--icon-size-xs); }
+  .icon-sm svg { width: var(--icon-size-sm); height: var(--icon-size-sm); }
+  .icon-md svg { width: var(--icon-size-md); height: var(--icon-size-md); }
+  .icon-lg svg { width: var(--icon-size-lg); height: var(--icon-size-lg); }
+  .icon-xl svg { width: var(--icon-size-xl); height: var(--icon-size-xl); }
+  .icon-2xl svg { width: var(--icon-size-2xl); height: var(--icon-size-2xl); }
+  .icon-3xl svg { width: var(--icon-size-3xl); height: var(--icon-size-3xl); }
+
   /* === 过渡动画 === */
   .transition-base {
     transition: all 0.2s ease;
@@ -746,42 +846,56 @@
 }
 
 /* ============================================
-   自定义滚动条 - 更精致
+   自定义滚动条 - 最终可靠版
 ============================================ */
+
+/* 1. 彻底隐藏所有按钮 */
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* 2. 滚动条容器轨道 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-  border-radius: var(--radius-full);
+  background: transparent;
 }
 
-::-webkit-scrollbar-track:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-
+/* 3. 滑块 (Thumb) */
 ::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: var(--radius-full);
-  border: none;
-  transition: all 0.2s ease;
+  /* 基础状态：明显的半透明灰色 */
+  background-color: rgba(155, 155, 155, 0.3); 
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  min-height: 40px;
 }
 
+/* 4. 当容器被悬浮时，滑块加深 */
+*:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(155, 155, 155, 0.6);
+}
+
+/* 5. 鼠标直接在滑块上：高亮 */
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
+  background-color: var(--color-primary) !important;
 }
 
+/* 6. 拖动状态 */
 ::-webkit-scrollbar-thumb:active {
-  background: var(--scrollbar-thumb-active);
-}
-
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  background-color: var(--color-primary-dark) !important;
 }
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* 7. 移除标准属性，改为 auto 允许 webkit 接管 */
+* {
+  scrollbar-width: auto !important;
 }

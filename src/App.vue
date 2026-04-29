@@ -1,12 +1,15 @@
 <script setup lang="ts">
-/**
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
-import { usePlayerStore } from './stores/playerStore';
+import { X } from 'lucide-vue-next';
+import { usePlaybackStore } from './stores/playbackStore';
+import { useLibraryStore } from './stores/libraryStore';
+import { usePlaylistStore } from './stores/playlistStore';
 import { useConfigStore } from './stores/configStore';
+import { useNeteaseStore } from './stores/neteaseStore';
 import { useThemeColor } from './composables/useThemeColor';
+import { useNavigation } from './composables/useNavigation';
+import { usePlayerControls } from './composables/usePlayerControls';
+import { usePlaylistManager } from './composables/usePlaylistManager';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import Sidebar from './components/Sidebar.vue';
@@ -14,32 +17,97 @@ import TitleBar from './components/TitleBar.vue';
 import PlayerBar from './components/PlayerBar.vue';
 import QueuePanel from './components/QueuePanel.vue';
 import NowPlayingPanel from './components/NowPlayingPanel.vue';
-import PlayerPage from './components/PlayerPage.vue';
-import LocalPage from './components/LocalPage.vue';
-import SettingsPage from './components/SettingsPage.vue';
-import PlaylistDetailPage from './components/PlaylistDetailPage.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import PromptDialog from './components/PromptDialog.vue';
 
-const playerStore = usePlayerStore();
+const playbackStore = usePlaybackStore();
+const libraryStore = useLibraryStore();
+const playlistStore = usePlaylistStore();
 const configStore = useConfigStore();
+const neteaseStore = useNeteaseStore();
 const { updateThemeFromCover } = useThemeColor();
 
+const {
+  currentView,
+  currentPlaylistId,
+  canGoBack,
+  canGoForward,
+  navigateBack,
+  navigateForward,
+  handleNavigate,
+  openPlaylist,
+  closePlaylistDetail,
+} = useNavigation();
+
+const {
+  isCurrentTrackFavorite,
+  handlePlayNext,
+  cycleRepeatMode,
+  toggleShuffle,
+  toggleFavorite,
+  playSearchAsNext,
+} = usePlayerControls();
+
+const {
+  showPlaylistDialog,
+  showDeleteConfirm,
+  showCreatePrompt,
+  openCreatePrompt,
+  handleCreatePlaylist,
+  requestDeletePlaylist,
+  confirmDeletePlaylist,
+  cancelDeletePlaylist,
+  handleAddToPlaylist,
+} = usePlaylistManager();
+
+const showQueuePanel = ref(false);
+const showNowPlayingPanel = ref(false);
+const showCloseHintDialog = ref(false);
+const rememberCloseChoice = ref(false);
+
+const favoritePaths = computed(() => {
+  const fav = playlistStore.favoritePlaylist;
+  if (!fav) return new Set<string>();
+  return new Set(fav.tracks.map(t => t.path));
+});
+
+function handleToggleFavorite(track: any) {
+  playlistStore.toggleFavorite(track);
+}
+
 onMounted(async () => {
-  playerStore.setOnTrackEndCallback(handlePlayNext);
+  playbackStore.initPlayerListeners();
+  playbackStore.setOnTrackEndCallback(handlePlayNext);
 
   await configStore.loadConfig();
 
-  await Promise.all([
-    playerStore.loadLibrary(),
-    playerStore.loadVolumeSettings()
+  neteaseStore.init();
+
+  const [loadedPlaylists] = await Promise.all([
+    libraryStore.loadLibrary(),
+    playbackStore.loadVolumeSettings()
   ]);
 
-  await playerStore.restorePlaybackState();
+  // 加载保存的播放列表
+  if (loadedPlaylists.length > 0) {
+    playlistStore.playlists = loadedPlaylists;
+  }
 
-  if (playerStore.libraryTracks.length > 0) {
+  // 确保"我喜欢的音乐"播放列表存在
+  playlistStore.ensureFavoritePlaylist();
+
+  const { playlistId } = await playbackStore.loadPlaybackState();
+  if (playlistId && configStore.persistPlayback) {
+    const playlist = playlistStore.playlists.find(p => p.id === playlistId);
+    if (playlist) {
+      playlistStore.currentPlaylistId = playlistId;
+      await playbackStore.restorePlaybackState(playlist.tracks, playlistId);
+    }
+  }
+
+  if (libraryStore.libraryTracks.length > 0) {
     console.log('[App] Starting cover preload...');
-    playerStore.preloadAllCovers();
+    libraryStore.preloadAllCovers(playlistStore.playlists);
   }
 
   window.addEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);
@@ -51,6 +119,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  playbackStore.destroyPlayerListeners();
   window.removeEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);
   window.removeEventListener('keydown', handleGlobalKeydown);
 });
@@ -70,7 +139,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
       e.preventDefault();
       switch (action) {
         case 'togglePlay':
-          playerStore.togglePlay();
+          playbackStore.togglePlay();
           break;
         case 'navigateBack':
           navigateBack();
@@ -88,7 +157,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
           handlePlayNext();
           break;
         case 'playPrev':
-          playerStore.playPrev();
+          playbackStore.playPrev();
           break;
       }
       return;
@@ -97,268 +166,50 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 }
 
 function handleSavePlaybackBeforeClose() {
-  playerStore.savePlaybackState();
+  if (configStore.persistPlayback) {
+    playbackStore.savePlaybackState(playbackStore.currentPlaylistId);
+  }
 }
 
-watch(() => playerStore.currentCoverUrl, (coverUrl) => {
+function handleCloseHintConfirm(remember: boolean) {
+  if (remember) {
+    configStore.setCloseBehavior('quit');
+  }
+  showCloseHintDialog.value = false;
+  invoke('quit_app').catch(console.error);
+}
+
+async function handleCloseHintCancel(remember: boolean) {
+  if (remember) {
+    await configStore.setCloseBehavior('to_tray');
+  }
+  showCloseHintDialog.value = false;
+  await invoke('hide_window').catch(console.error);
+}
+
+watch(() => playbackStore.currentCoverUrl, (coverUrl) => {
   if (coverUrl) {
     updateThemeFromCover(coverUrl);
   }
 }, { immediate: true });
 
-type ViewName = 'player' | 'local' | 'settings' | 'playlist-detail';
-
-const currentView = ref<ViewName>('player');
-const showQueuePanel = ref(false);
-const showNowPlayingPanel = ref(false);
-const showPlaylistDialog = ref(false);
-const showDeleteConfirm = ref(false);
-const showCloseHintDialog = ref(false);
-const pendingDeleteId = ref<string | null>(null);
-const showCreatePrompt = ref(false);
-const currentPlaylistId = ref<string | null>(null);
-const isScanning = ref(false);
-
-interface NavEntry {
-  view: ViewName;
-  playlistId?: string | null;
-}
-
-const navHistory = ref<NavEntry[]>([{ view: 'player' }]);
-const navHistoryIndex = ref(0);
-
-function pushHistory(view: ViewName, playlistId?: string | null) {
-  const current = navHistory.value[navHistoryIndex.value];
-  if (current.view !== view || current.playlistId !== playlistId) {
-    navHistory.value = navHistory.value.slice(0, navHistoryIndex.value + 1);
-    navHistory.value.push({ view, playlistId: playlistId ?? null });
-    navHistoryIndex.value = navHistory.value.length - 1;
-  }
-}
-
-function navigateBack() {
-  if (navHistoryIndex.value > 0) {
-    navHistoryIndex.value--;
-    const entry = navHistory.value[navHistoryIndex.value];
-    currentView.value = entry.view;
-    currentPlaylistId.value = entry.playlistId ?? null;
-  }
-}
-
-function navigateForward() {
-  if (navHistoryIndex.value < navHistory.value.length - 1) {
-    navHistoryIndex.value++;
-    const entry = navHistory.value[navHistoryIndex.value];
-    currentView.value = entry.view;
-    currentPlaylistId.value = entry.playlistId ?? null;
-  }
-}
-
-function handleNavigate(view: string) {
-  const newView = view as ViewName;
-  if (newView !== 'playlist-detail') {
-    currentPlaylistId.value = null;
-  }
-  currentView.value = newView;
-  pushHistory(newView);
-}
-
-function openPlaylist(playlistId: string) {
-  currentPlaylistId.value = playlistId;
-  currentView.value = 'playlist-detail';
-  pushHistory('playlist-detail', playlistId);
-}
-
-function closePlaylistDetail() {
-  navigateBack();
-}
-
-const canGoBack = computed(() => navHistoryIndex.value > 0);
-const canGoForward = computed(() => navHistoryIndex.value < navHistory.value.length - 1);
-
-const isCurrentTrackFavorite = computed(() => {
-  if (!playerStore.currentTrack) return false;
-  return playerStore.isTrackFavorite(playerStore.currentTrack.path);
-});
-
 const playbackStatusLabel = computed(() => {
-  if (!playerStore.currentTrack) return '';
-  const status = playerStore.isPlaying ? '正在播放' : '已暂停';
-  return `${status}：${playerStore.currentTrack.title}，艺术家：${playerStore.currentTrack.artist}`;
+  if (!playbackStore.currentTrack) return '';
+  const status = playbackStore.isPlaying ? '正在播放' : '已暂停';
+  return `${status}：${playbackStore.currentTrack.title}，艺术家：${playbackStore.currentTrack.artist}`;
 });
-
-const favoriteTrackPaths = computed(() => {
-  return playerStore.favoritePlaylist?.tracks.map(t => t.path) ?? [];
-});
-
-function handlePlayNext() {
-  const queue = playerStore.queue;
-  if (queue.length === 0) return;
-
-  if (playerStore.isShuffle) {
-    const currentIdx = playerStore.currentIndex;
-    if (queue.length === 1) return;
-    let randomIndex;
-    do {
-      randomIndex = Math.floor(Math.random() * queue.length);
-    } while (randomIndex === currentIdx);
-    playerStore.playTrack(randomIndex);
-    return;
-  }
-
-  if (playerStore.repeatMode === 'one') {
-    playerStore.playTrack(playerStore.currentIndex);
-    return;
-  }
-
-  const nextIndex = playerStore.currentIndex + 1;
-  if (nextIndex >= queue.length) {
-    if (playerStore.repeatMode === 'all') {
-      playerStore.playTrack(0);
-    }
-    return;
-  }
-
-  playerStore.playTrack(nextIndex);
-}
-
-function cycleRepeatMode() {
-  const modes: Array<'none' | 'one' | 'all'> = ['all', 'one', 'none'];
-  const currentIdx = modes.indexOf(playerStore.repeatMode);
-  playerStore.repeatMode = modes[(currentIdx + 1) % modes.length];
-  playerStore.savePlaybackModeSettings();
-}
-
-function toggleShuffle() {
-  playerStore.isShuffle = !playerStore.isShuffle;
-  playerStore.savePlaybackModeSettings();
-}
-
-function toggleFavorite() {
-  if (!playerStore.currentTrack) return;
-  playerStore.toggleFavorite(playerStore.currentTrack);
-}
-
-function handleCloseHintConfirm() {
-  configStore.setCloseBehavior('quit');
-  showCloseHintDialog.value = false;
-  invoke('quit_app').catch(console.error);
-}
-
-function handleCloseHintCancel() {
-  configStore.setCloseBehavior('to_tray');
-  showCloseHintDialog.value = false;
-}
-
-function openCreatePrompt() {
-  showCreatePrompt.value = true;
-}
-
-function handleCreatePlaylist(name: string) {
-  playerStore.createPlaylist(name);
-  showCreatePrompt.value = false;
-}
-
-function playPlaylist(id: string) {
-  playerStore.loadPlaylistToQueue(id);
-}
-
-function playTrackFromPlaylist(trackId: string) {
-  if (!currentPlaylistId.value) return;
-  playerStore.playTrackFromPlaylist(currentPlaylistId.value, trackId);
-}
-
-function updatePlaylistDescription(description: string) {
-  if (!currentPlaylistId.value) return;
-  playerStore.updatePlaylistDescription(currentPlaylistId.value, description);
-}
-
-function removeTrackFromPlaylist(trackId: string) {
-  if (!currentPlaylistId.value) return;
-  playerStore.removeFromPlaylist(currentPlaylistId.value, trackId);
-}
-
-function reorderTracksInPlaylist(fromIndex: number, toIndex: number) {
-  if (!currentPlaylistId.value) return;
-  playerStore.reorderPlaylistTracks(currentPlaylistId.value, fromIndex, toIndex);
-}
-
-function toggleTrackFavorite(track: any) {
-  playerStore.toggleFavorite(track);
-}
-
-function requestDeletePlaylist(playlistId: string) {
-  pendingDeleteId.value = playlistId;
-  showDeleteConfirm.value = true;
-}
-
-async function confirmDeletePlaylist() {
-  const playlistIdToDelete = pendingDeleteId.value;
-  showDeleteConfirm.value = false;
-  pendingDeleteId.value = null;
-
-  if (playlistIdToDelete) {
-    if (currentPlaylistId.value === playlistIdToDelete) {
-      closePlaylistDetail();
-    }
-    await playerStore.deletePlaylist(playlistIdToDelete);
-  }
-}
-
-function cancelDeletePlaylist() {
-  pendingDeleteId.value = null;
-  showDeleteConfirm.value = false;
-}
-
-async function addLibraryFolder() {
-  try {
-    const folderPath = await invoke<string | null>('open_folder_dialog');
-    if (folderPath) {
-      await playerStore.addFolder(folderPath);
-    }
-  } catch (error) {
-    console.error('Failed to add folder:', error);
-  }
-}
-
-async function scanFolders() {
-  isScanning.value = true;
-  try {
-    await playerStore.scanLibraryFolders();
-  } finally {
-    isScanning.value = false;
-  }
-}
 
 function addSelectedToPlaylist() {
-  if (playerStore.selectedFileIds.size === 0) {
+  if (libraryStore.selectedFileIds.size === 0) {
     console.log('[App] No files selected');
     return;
   }
-  console.log('[App] Opening playlist dialog, selected:', playerStore.selectedFileIds.size, 'files');
+  console.log('[App] Opening playlist dialog, selected:', libraryStore.selectedFileIds.size, 'files');
   showPlaylistDialog.value = true;
 }
 
-function handleAddToPlaylist(playlistId: string) {
-  console.log('[App] Adding to playlist:', playlistId);
-  playerStore.addSelectedToPlaylist(playlistId);
-  showPlaylistDialog.value = false;
-}
-
-function addSelectedToQueue() {
-  playerStore.addSelectedToQueue();
-}
-
-function selectFolder(folder: string) {
-  playerStore.selectFolder(folder);
-}
-
-function handleSelectAll() {
-  playerStore.selectAllFiles();
-}
-
-function playSearchAsNext(track: any) {
-  playerStore.insertAndPlayNext(track);
+async function _confirmDeletePlaylist() {
+  await confirmDeletePlaylist(closePlaylistDetail);
 }
 </script>
 
@@ -370,7 +221,7 @@ function playSearchAsNext(track: any) {
       <Sidebar
         :current-view="currentView"
         :current-playlist-id="currentPlaylistId"
-        :playlists="playerStore.playlists.map(p => ({ id: p.id, name: p.name, trackCount: p.tracks.length }))"
+        :playlists="playlistStore.playlists.map(p => ({ id: p.id, name: p.name, trackCount: p.tracks.length }))"
         @navigate="handleNavigate"
         @open-playlist="openPlaylist"
         @request-create="openCreatePrompt"
@@ -389,91 +240,46 @@ function playSearchAsNext(track: any) {
 
         <main id="main-content" class="main-content">
           <div class="content-area">
-            <PlayerPage
-              v-if="currentView === 'player'"
-              :playlists="playerStore.playlists"
-              :current-track="playerStore.currentTrack"
-              :is-liked="isCurrentTrackFavorite"
+            <router-view
               @create-playlist="openCreatePrompt"
               @open-playlist="openPlaylist"
-              @play-playlist="playPlaylist"
-              @toggle-like="toggleFavorite"
-            />
-
-            <LocalPage
-              v-else-if="currentView === 'local'"
-              :tracks="playerStore.libraryTracks"
-              :selected-ids="playerStore.selectedFileIds"
-              :tracks-by-folder="playerStore.tracksByFolder"
-              :favorite-track-paths="favoriteTrackPaths"
-              @toggle-selection="playerStore.toggleFileSelection"
-              @select-all="handleSelectAll"
-              @deselect-all="playerStore.deselectAllFiles"
-              @select-folder="selectFolder"
               @add-to-playlist="addSelectedToPlaylist"
-              @add-to-queue="addSelectedToQueue"
-              @toggle-favorite="toggleTrackFavorite"
-              @navigate="handleNavigate"
-            />
-
-            <SettingsPage
-              v-else-if="currentView === 'settings'"
-              :folders="playerStore.libraryFolders"
-              :scan-depth="playerStore.scanDepth"
-              :is-scanning="isScanning"
-              :scan-progress="playerStore.scanProgress"
-              @add-folder="addLibraryFolder"
-              @remove-folder="playerStore.removeFolder"
-              @scan-folders="scanFolders"
-              @update-scan-depth="playerStore.setScanDepth"
-            />
-
-            <PlaylistDetailPage
-              v-else-if="currentView === 'playlist-detail' && currentPlaylistId"
-              :playlist="playerStore.playlists.find(p => p.id === currentPlaylistId)!"
-              :current-track-id="playerStore.currentTrack?.id"
-              :is-playing="playerStore.isPlaying"
-              :favorite-track-paths="favoriteTrackPaths"
-              @play-playlist="playPlaylist(currentPlaylistId)"
-              @play-track="playTrackFromPlaylist"
-              @update-description="updatePlaylistDescription"
-              @remove-track="removeTrackFromPlaylist"
-              @reorder-tracks="reorderTracksInPlaylist"
-              @toggle-favorite="toggleTrackFavorite"
             />
           </div>
 
           <NowPlayingPanel
             v-model="showNowPlayingPanel"
-            :current-track="playerStore.currentTrack"
-            :current-time="playerStore.currentTime"
-            @seek="playerStore.setCurrentTime"
+            :current-track="playbackStore.currentTrack"
+            :current-time="playbackStore.currentTime"
+            @seek="playbackStore.setCurrentTime"
           />
 
           <QueuePanel
             v-model="showQueuePanel"
-            :queue="playerStore.queue"
-            :current-index="playerStore.currentIndex"
-            :is-playing="playerStore.isPlaying"
-            @select-track="playerStore.playTrack"
-            @remove-track="playerStore.removeFromQueue"
-            @clear-queue="playerStore.clearQueue"
+            :queue="playbackStore.queue"
+            :current-index="playbackStore.currentIndex"
+            :is-playing="playbackStore.isPlaying"
+            :favorite-paths="favoritePaths"
+            @select-track="playbackStore.playTrack"
+            @remove-track="playbackStore.removeFromQueue"
+            @clear-queue="playbackStore.clearQueue"
+            @toggle-favorite="handleToggleFavorite"
           />
 
           <div v-if="showPlaylistDialog" class="dialog-overlay" @click="showPlaylistDialog = false">
             <div class="dialog-content md3-surface-tinted" @click.stop>
               <div class="dialog-header">
                 <h3 class="text-lg font-semibold text-[var(--text-primary)]">添加到播放列表</h3>
-                <button class="md3-icon-btn-sm text-[var(--text-tertiary)]" @click="showPlaylistDialog = false">×</button>
+                <button class="md3-icon-btn-xs state-layer text-[var(--text-tertiary)]" @click="showPlaylistDialog = false">×</button>
               </div>
               <div class="dialog-body">
-                <div v-if="playerStore.playlists.length === 0" class="text-center py-16 px-5">
+                <div v-if="playlistStore.playlists.length === 0" class="text-center py-16 px-5">
                   <p class="text-[var(--text-tertiary)]">还没有播放列表</p>
                   <p class="text-sm text-[var(--text-disabled)] mt-1">请先创建一个播放列表</p>
                 </div>
                 <div v-else class="space-y-2">
                   <button
-                    v-for="playlist in playerStore.playlists"
+                    v-for="playlist in playlistStore.playlists"
                     :key="playlist.id"
                     class="w-full flex items-center justify-between px-4 py-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-container)]/30 transition-all text-left"
                     @click="handleAddToPlaylist(playlist.id)"
@@ -490,22 +296,22 @@ function playSearchAsNext(track: any) {
     </div>
 
     <PlayerBar
-      :current-track="playerStore.currentTrack"
-      :is-playing="playerStore.isPlaying"
-      :current-time="playerStore.currentTime"
-      :duration="playerStore.duration"
-      :volume="playerStore.volume"
-      :is-shuffle="playerStore.isShuffle"
-      :repeat-mode="playerStore.repeatMode"
+      :current-track="playbackStore.currentTrack"
+      :is-playing="playbackStore.isPlaying"
+      :current-time="playbackStore.currentTime"
+      :duration="playbackStore.duration"
+      :volume="playbackStore.volume"
+      :is-shuffle="playbackStore.isShuffle"
+      :repeat-mode="playbackStore.repeatMode"
       :show-queue-panel="showQueuePanel"
       :show-now-playing-panel="showNowPlayingPanel"
-      :cover-url="playerStore.currentCoverUrl"
+      :cover-url="playbackStore.currentCoverUrl"
       :is-favorite="isCurrentTrackFavorite"
-      @toggle-play="playerStore.togglePlay"
-      @play-next="playerStore.playNext"
-      @play-prev="playerStore.playPrev"
-      @time-change="playerStore.setCurrentTime"
-      @volume-change="playerStore.setVolume"
+      @toggle-play="playbackStore.togglePlay"
+      @play-next="playbackStore.playNext"
+      @play-prev="playbackStore.playPrev"
+      @time-change="playbackStore.setCurrentTime"
+      @volume-change="playbackStore.setVolume"
       @toggle-shuffle="toggleShuffle"
       @cycle-repeat="cycleRepeatMode"
       @toggle-queue="showQueuePanel = !showQueuePanel"
@@ -520,7 +326,7 @@ function playSearchAsNext(track: any) {
       confirm-text="删除"
       cancel-text="取消"
       variant="danger"
-      @confirm="confirmDeletePlaylist"
+      @confirm="_confirmDeletePlaylist"
       @cancel="cancelDeletePlaylist"
     />
 
@@ -534,16 +340,46 @@ function playSearchAsNext(track: any) {
       @cancel="showCreatePrompt = false"
     />
 
-    <ConfirmDialog
-      :open="showCloseHintDialog"
-      title="选择关闭行为"
-      message="关闭按钮将直接退出应用。如果想最小化到托盘，请在设置中修改关闭按钮行为。您希望如何处理？"
-      confirm-text="直接退出"
-      cancel-text="最小化到托盘"
-      variant="warning"
-      @confirm="handleCloseHintConfirm"
-      @cancel="handleCloseHintCancel"
-    />
+    <!-- 首次关闭提示对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showCloseHintDialog"
+        class="close-hint-overlay"
+        @click.self="handleCloseHintCancel(false)"
+        role="presentation"
+      >
+        <div
+          class="close-hint-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="close-hint-title"
+        >
+          <div class="close-hint-header">
+            <h3 id="close-hint-title" class="close-hint-title">选择关闭行为</h3>
+            <button class="close-hint-close" @click="handleCloseHintCancel(false)" aria-label="关闭对话框">
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="close-hint-body">
+            <p>关闭按钮将直接退出应用。如果想最小化到托盘，请在设置中修改关闭按钮行为。您希望如何处理？</p>
+            <label class="close-hint-remember">
+              <input
+                v-model="rememberCloseChoice"
+                type="checkbox"
+                class="close-hint-checkbox"
+              />
+              <span>记住我的选择，不再询问</span>
+            </label>
+          </div>
+
+          <div class="close-hint-footer">
+            <button class="btn-cancel" @click="handleCloseHintCancel(rememberCloseChoice)">最小化到托盘</button>
+            <button class="btn-confirm warning" @click="handleCloseHintConfirm(rememberCloseChoice)">直接退出</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -593,7 +429,8 @@ function playSearchAsNext(track: any) {
 .dialog-overlay {
   @apply fixed inset-0 flex items-center justify-center z-[2000];
   background: var(--scrim);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(16px) var(--glass-saturate);
+  -webkit-backdrop-filter: blur(16px) var(--glass-saturate);
 }
 
 .dialog-content {
@@ -608,5 +445,154 @@ function playSearchAsNext(track: any) {
 
 .dialog-body {
   @apply flex-1 overflow-y-auto p-4;
+}
+
+.close-hint-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.15s ease;
+}
+
+.close-hint-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  animation: slideUp 0.2s ease;
+}
+
+.close-hint-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 20px 0;
+}
+
+.close-hint-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.close-hint-icon.warning {
+  background: #fef3c7;
+  color: #eab308;
+}
+
+.close-hint-title {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.close-hint-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-disabled);
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.close-hint-close:hover {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.close-hint-body {
+  padding: 16px 20px;
+}
+
+.close-hint-body p {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.close-hint-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.close-hint-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.close-hint-footer {
+  display: flex;
+  gap: 12px;
+  padding: 0 20px 20px;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-confirm {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+}
+
+.btn-cancel {
+  background: var(--hover-overlay);
+  color: var(--text-secondary);
+}
+
+.btn-cancel:hover {
+  background: var(--pressed-overlay);
+  color: var(--text-primary);
+}
+
+.btn-confirm {
+  color: white;
+}
+
+.btn-confirm.warning {
+  background: #eab308;
+}
+
+.btn-confirm.warning:hover {
+  background: #ca8a04;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 </style>

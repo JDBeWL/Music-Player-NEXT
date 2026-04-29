@@ -141,7 +141,7 @@ function handleCancel() {
   height: 32px;
   border: none;
   background: transparent;
-  color: var(--text-quaternary);
+  color: var(--text-disabled);
   cursor: pointer;
   border-radius: 6px;
   display: flex;
@@ -151,7 +151,7 @@ function handleCancel() {
 }
 
 .confirm-close:hover {
-  background: var(--bg-hover);
+  background: var(--hover-overlay);
   color: var(--text-primary);
 }
 
@@ -185,12 +185,12 @@ function handleCancel() {
 }
 
 .btn-cancel {
-  background: var(--bg-hover);
+  background: var(--hover-overlay);
   color: var(--text-secondary);
 }
 
 .btn-cancel:hover {
-  background: var(--bg-active);
+  background: var(--pressed-overlay);
   color: var(--text-primary);
 }
 

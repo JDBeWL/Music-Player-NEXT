@@ -1,16 +1,6 @@
 import { NativeAudioPlayer } from './NativeAudioPlayer';
 import { FFmpegAudioService } from './FFmpegService';
-
-export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
-
-export interface AudioTrack {
-  id: string;
-  path: string;
-  title: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-}
+import type { AudioTrack, PlaybackState } from '@/types';
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type ProgressCallback = (currentTime: number, duration: number) => void;

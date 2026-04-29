@@ -20,6 +20,7 @@ pub struct SearchIndex {
     duration_field: Field,
     cover_url_field: Field,
     cover_id_field: Field,
+    has_lrc_field: Field,
 }
 
 impl SearchIndex {
@@ -42,6 +43,7 @@ impl SearchIndex {
         let duration_field = schema_builder.add_text_field("duration", STORED);
         let cover_url_field = schema_builder.add_text_field("cover_url", STORED);
         let cover_id_field = schema_builder.add_text_field("cover_id", STORED);
+        let has_lrc_field = schema_builder.add_text_field("has_lrc", STORED);
 
         let schema = schema_builder.build();
 
@@ -95,6 +97,7 @@ impl SearchIndex {
             duration_field,
             cover_url_field,
             cover_id_field,
+            has_lrc_field,
         })
     }
 
@@ -110,6 +113,7 @@ impl SearchIndex {
             self.duration_field => track.duration.to_string(),
             self.cover_url_field => track.cover_url.clone().unwrap_or_default(),
             self.cover_id_field => track.cover_id.clone().unwrap_or_default(),
+            self.has_lrc_field => if track.has_lrc { "1" } else { "0" }.to_string(),
         );
 
         writer.add_document(doc).map_err(|e| e.to_string())?;
@@ -128,6 +132,7 @@ impl SearchIndex {
                 self.duration_field => track.duration.to_string(),
                 self.cover_url_field => track.cover_url.clone().unwrap_or_default(),
                 self.cover_id_field => track.cover_id.clone().unwrap_or_default(),
+                self.has_lrc_field => if track.has_lrc { "1" } else { "0" }.to_string(),
             );
             writer.add_document(doc).map_err(|e| e.to_string())?;
         }
@@ -229,6 +234,10 @@ impl SearchIndex {
                 .and_then(|v| v.as_str())
                 .map(|s| if s.is_empty() { None } else { Some(s.to_string()) })
                 .flatten();
+            let has_lrc = retrieved_doc.get_first(self.has_lrc_field)
+                .and_then(|v| v.as_str())
+                .map(|s| s == "1")
+                .unwrap_or(false);
 
             results.push(AudioTrack {
                 id,
@@ -240,6 +249,8 @@ impl SearchIndex {
                 cover_url,
                 cover_id,
                 file_mtime: None,
+                lrc: None,
+                has_lrc,
             });
         }
 

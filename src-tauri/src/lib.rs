@@ -6,21 +6,25 @@ use std::fs;
 use std::path::PathBuf;
 use tauri_plugin_dialog::DialogExt;
 use tauri::{AppHandle, Emitter, Manager};
-use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy;
+use std::sync::{Arc, RwLock};
+use std::sync::OnceLock;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::task;
 
 mod cover_cache;
-use cover_cache::COVER_CACHE;
+use cover_cache::get_cover_cache;
 
 mod search_index;
 use search_index::SearchIndex;
 
-static SEARCH_INDEX: Lazy<Arc<Mutex<Option<SearchIndex>>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(None))
-});
+mod netease;
+
+static SEARCH_INDEX: OnceLock<Arc<RwLock<Option<SearchIndex>>>> = OnceLock::new();
+
+fn get_search_index() -> &'static Arc<RwLock<Option<SearchIndex>>> {
+    SEARCH_INDEX.get_or_init(|| Arc::new(RwLock::new(None)))
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScanProgress {
@@ -58,6 +62,10 @@ pub struct AudioTrack {
     pub cover_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "fileMtime")]
     pub file_mtime: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lrc: Option<String>,
+    #[serde(rename = "hasLrc")]
+    pub has_lrc: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -105,7 +113,7 @@ fn get_settings_path() -> PathBuf {
     get_data_dir().join("settings.json")
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     #[serde(default = "default_volume")]
     pub volume: f32,
@@ -131,13 +139,40 @@ pub struct AppSettings {
     pub close_behavior: String,
     #[serde(default)]
     pub first_close_hint_shown: bool,
+    #[serde(default = "default_persist_playback")]
+    pub persist_playback: bool,
+    #[serde(default = "default_netease_real_ip")]
+    pub netease_real_ip: String,
 }
 
-fn default_volume() -> f32 { 0.7 }
+impl Default for AppSettings {
+    fn default() -> Self {
+        AppSettings {
+            volume: default_volume(),
+            lyrics_display_mode: default_lyrics_display_mode(),
+            show_translation: false,
+            enable_lyrics_blur: false,
+            last_played_track_id: None,
+            last_played_position: 0.0,
+            last_played_playlist_id: None,
+            repeat_mode: default_repeat_mode(),
+            shuffle: false,
+            theme_mode: default_theme_mode(),
+            close_behavior: default_close_behavior(),
+            first_close_hint_shown: false,
+            persist_playback: default_persist_playback(),
+            netease_real_ip: default_netease_real_ip(),
+        }
+    }
+}
+
+fn default_volume() -> f32 { 0.5 }
 fn default_lyrics_display_mode() -> String { "modern".to_string() }
 fn default_repeat_mode() -> String { "all".to_string() }
 fn default_theme_mode() -> String { "dark".to_string() }
 fn default_close_behavior() -> String { "to_tray".to_string() }
+fn default_persist_playback() -> bool { true }
+fn default_netease_real_ip() -> String { "116.25.146.177".to_string() }
 
 #[tauri::command]
 async fn get_settings() -> Result<AppSettings, String> {
@@ -180,11 +215,64 @@ async fn save_settings(settings: AppSettings) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PartialSettings {
+    pub volume: Option<f32>,
+    pub lyrics_display_mode: Option<String>,
+    pub show_translation: Option<bool>,
+    pub enable_lyrics_blur: Option<bool>,
+    pub last_played_track_id: Option<Option<String>>,
+    pub last_played_position: Option<f32>,
+    pub last_played_playlist_id: Option<Option<String>>,
+    pub repeat_mode: Option<String>,
+    pub shuffle: Option<bool>,
+    pub theme_mode: Option<String>,
+    pub close_behavior: Option<String>,
+    pub first_close_hint_shown: Option<bool>,
+    pub persist_playback: Option<bool>,
+    pub netease_real_ip: Option<String>,
+}
+
+#[tauri::command]
+async fn update_settings(partial: PartialSettings) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let dir = ensure_data_dir().map_err(|e| e.to_string())?;
+        let path = dir.join("settings.json");
+
+        let mut settings = if path.exists() {
+            let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            serde_json::from_str::<AppSettings>(&content).unwrap_or_default()
+        } else {
+            AppSettings::default()
+        };
+
+        if let Some(v) = partial.volume { settings.volume = v; }
+        if let Some(v) = partial.lyrics_display_mode { settings.lyrics_display_mode = v; }
+        if let Some(v) = partial.show_translation { settings.show_translation = v; }
+        if let Some(v) = partial.enable_lyrics_blur { settings.enable_lyrics_blur = v; }
+        if let Some(v) = partial.last_played_track_id { settings.last_played_track_id = v; }
+        if let Some(v) = partial.last_played_position { settings.last_played_position = v; }
+        if let Some(v) = partial.last_played_playlist_id { settings.last_played_playlist_id = v; }
+        if let Some(v) = partial.repeat_mode { settings.repeat_mode = v; }
+        if let Some(v) = partial.shuffle { settings.shuffle = v; }
+        if let Some(v) = partial.theme_mode { settings.theme_mode = v; }
+        if let Some(v) = partial.close_behavior { settings.close_behavior = v; }
+        if let Some(v) = partial.first_close_hint_shown { settings.first_close_hint_shown = v; }
+        if let Some(v) = partial.persist_playback { settings.persist_playback = v; }
+        if let Some(v) = partial.netease_real_ip { settings.netease_real_ip = v; }
+
+        let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+        fs::write(&path, content).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn init_search_index() -> Result<(), String> {
     let index_path = get_index_dir();
     let search_index = SearchIndex::new(index_path)?;
 
-    let mut global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+    let mut global_index = get_search_index().write().map_err(|e| e.to_string())?;
     *global_index = Some(search_index);
     Ok(())
 }
@@ -226,7 +314,7 @@ async fn rebuild_search_index() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let library = get_library_sync()?;
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
 
@@ -234,7 +322,7 @@ async fn rebuild_search_index() -> Result<(), String> {
             init_search_index()?;
         }
 
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.clear()?;
             index.add_tracks(&library.tracks)?;
@@ -250,7 +338,7 @@ async fn rebuild_search_index() -> Result<(), String> {
 async fn add_tracks_to_index(tracks: Vec<AudioTrack>) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
 
@@ -258,7 +346,7 @@ async fn add_tracks_to_index(tracks: Vec<AudioTrack>) -> Result<(), String> {
             init_search_index()?;
         }
 
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.add_tracks(&tracks)?;
         }
@@ -273,7 +361,7 @@ async fn add_tracks_to_index(tracks: Vec<AudioTrack>) -> Result<(), String> {
 async fn add_track_to_index(track: AudioTrack) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
 
@@ -281,7 +369,7 @@ async fn add_track_to_index(track: AudioTrack) -> Result<(), String> {
             init_search_index()?;
         }
 
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.add_track(&track)?;
             index.commit()?;
@@ -296,7 +384,7 @@ async fn add_track_to_index(track: AudioTrack) -> Result<(), String> {
 #[tauri::command]
 async fn remove_track_from_index(track_id: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.remove_track(&track_id)?;
         }
@@ -310,7 +398,7 @@ async fn remove_track_from_index(track_id: String) -> Result<(), String> {
 async fn remove_tracks_from_index(track_ids: Vec<String>) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
 
@@ -318,7 +406,7 @@ async fn remove_tracks_from_index(track_ids: Vec<String>) -> Result<(), String> 
             init_search_index()?;
         }
 
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.remove_tracks(&track_ids)?;
         }
@@ -332,7 +420,7 @@ async fn remove_tracks_from_index(track_ids: Vec<String>) -> Result<(), String> 
 async fn clear_search_index() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
 
@@ -340,7 +428,7 @@ async fn clear_search_index() -> Result<(), String> {
             init_search_index()?;
         }
 
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.clear()?;
         }
@@ -354,7 +442,7 @@ async fn clear_search_index() -> Result<(), String> {
 async fn search_tracks(query: String, limit: Option<usize>) -> Result<Vec<AudioTrack>, String> {
     tokio::task::spawn_blocking(move || {
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
 
@@ -362,7 +450,7 @@ async fn search_tracks(query: String, limit: Option<usize>) -> Result<Vec<AudioT
             init_search_index()?;
         }
 
-        let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+        let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
             index.search(&query, limit.unwrap_or(50))
         } else {
@@ -405,7 +493,7 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
             .collect();
 
         let needs_init = {
-            let guard = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let guard = get_search_index().read().map_err(|e| e.to_string())?;
             guard.is_none()
         };
         if needs_init {
@@ -413,14 +501,14 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
         }
 
         {
-            let global_index = SEARCH_INDEX.lock().map_err(|e| e.to_string())?;
+            let global_index = get_search_index().read().map_err(|e| e.to_string())?;
             if let Some(index) = global_index.as_ref() {
                 index.remove_tracks(&track_ids).map_err(|e| e.to_string())?;
             }
         }
 
         {
-            let mut cache = COVER_CACHE.write().map_err(|e| e.to_string())?;
+            let mut cache = get_cover_cache().write().map_err(|e| e.to_string())?;
             for cover_id in &ids {
                 let _ = cache.remove(cover_id);
             }
@@ -582,7 +670,7 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
                     let data = picture.data();
                     let hash = cover_cache::compute_cover_hash(data);
 
-                    if let Ok(ref cache) = COVER_CACHE.read() {
+                    if let Ok(ref cache) = get_cover_cache().read() {
                         if let Some((existing_id, entry)) = cache.find_by_hash(hash) {
                             cover_url = Some(entry.cover_path);
                             cover_id_val = Some(existing_id);
@@ -591,7 +679,7 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
 
                     if cover_url.is_none() {
                         let cid = format!("cover_{}", uuid_simple());
-                        if let Ok(ref mut c) = COVER_CACHE.write() {
+                        if let Ok(ref mut c) = get_cover_cache().write() {
                             if let Ok(entry) = c.put(cid.clone(), data) {
                                 cover_url = Some(entry.cover_path);
                                 cover_id_val = Some(cid);
@@ -617,6 +705,12 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs());
 
+    // 检测是否存在歌词文件
+    let path_obj = std::path::Path::new(&path);
+    let lrc_path = path_obj.with_extension("lrc");
+    let ass_path = path_obj.with_extension("ass");
+    let has_lrc = lrc_path.exists() || ass_path.exists();
+
     Ok(AudioTrack {
         id: format!("track_{}", uuid_simple()),
         path: path.to_string(),
@@ -627,6 +721,8 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
         cover_url,
         cover_id: cover_id_val,
         file_mtime,
+        lrc: None,
+        has_lrc,
     })
 }
 
@@ -636,7 +732,8 @@ fn uuid_simple() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{:x}", nanos)
+    let rand_part = (nanos.wrapping_mul(6364136223846793005) ^ 1442695040888963407) as u64;
+    format!("{:x}{:08x}", nanos, (rand_part & 0xFFFFFFFF) as u32)
 }
 
 #[tauri::command]
@@ -855,6 +952,12 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
                         cover_url: None,
                         cover_id: None,
                         file_mtime,
+                        lrc: None,
+                        has_lrc: {
+                            let lrc_path = file_path.with_extension("lrc");
+                            let ass_path = file_path.with_extension("ass");
+                            lrc_path.exists() || ass_path.exists()
+                        },
                     }
                 })
         })
@@ -906,7 +1009,7 @@ async fn extract_covers_batch(tracks: Vec<AudioTrack>) -> Result<Vec<AudioTrack>
 
         let mut hash_to_existing: HashMap<u64, (String, cover_cache::CoverCacheEntry)> = HashMap::new();
 
-        if let Ok(ref cache) = COVER_CACHE.read() {
+        if let Ok(ref cache) = get_cover_cache().read() {
             for (_, _, hash) in &extracted {
                 if *hash != 0 && !hash_to_existing.contains_key(hash) {
                     if let Some((id, entry)) = cache.find_by_hash(*hash) {
@@ -916,10 +1019,11 @@ async fn extract_covers_batch(tracks: Vec<AudioTrack>) -> Result<Vec<AudioTrack>
             }
         }
 
-        let mut to_cache: Vec<(String, Vec<u8>, u64)> = Vec::new();
+        let mut to_cache: Vec<(String, Vec<u8>, u64, usize)> = Vec::new();
         let mut results: Vec<AudioTrack> = Vec::new();
 
         for (mut track, data, hash) in extracted {
+            let result_idx = results.len();
             if let Some(data) = data {
                 if let Some((existing_id, entry)) = hash_to_existing.get(&hash) {
                     track.cover_url = Some(entry.cover_path.clone());
@@ -927,7 +1031,7 @@ async fn extract_covers_batch(tracks: Vec<AudioTrack>) -> Result<Vec<AudioTrack>
                     results.push(track);
                 } else {
                     let cover_id = format!("cover_{}", uuid_simple());
-                    to_cache.push((cover_id.clone(), data, hash));
+                    to_cache.push((cover_id.clone(), data, hash, result_idx));
                     results.push(track);
                 }
             } else {
@@ -936,9 +1040,9 @@ async fn extract_covers_batch(tracks: Vec<AudioTrack>) -> Result<Vec<AudioTrack>
         }
 
         if !to_cache.is_empty() {
-            let cache_inputs: Vec<(String, Vec<u8>)> = to_cache.iter().map(|(id, data, _)| (id.clone(), data.clone())).collect();
+            let cache_inputs: Vec<(String, Vec<u8>)> = to_cache.iter().map(|(id, data, _, _)| (id.clone(), data.clone())).collect();
 
-            if let Ok(ref mut cache) = COVER_CACHE.write() {
+            if let Ok(ref mut cache) = get_cover_cache().write() {
                 let cached = cache.put_batch(cache_inputs);
 
                 let mut id_to_entry: HashMap<String, cover_cache::CoverCacheEntry> = HashMap::new();
@@ -948,11 +1052,11 @@ async fn extract_covers_batch(tracks: Vec<AudioTrack>) -> Result<Vec<AudioTrack>
                     }
                 }
 
-                for (i, (_, _, hash)) in to_cache.iter().enumerate() {
-                    if i < results.len() {
+                for (_, _, hash, result_idx) in &to_cache {
+                    if *result_idx < results.len() {
                         if let Some((real_id, entry)) = cache.find_by_hash(*hash) {
-                            results[i].cover_url = Some(entry.cover_path);
-                            results[i].cover_id = Some(real_id);
+                            results[*result_idx].cover_url = Some(entry.cover_path);
+                            results[*result_idx].cover_id = Some(real_id);
                         }
                     }
                 }
@@ -1059,6 +1163,7 @@ pub fn run() {
             get_close_behavior,
             set_close_behavior_and_hint,
             save_settings,
+            update_settings,
             save_playback_state,
             get_playback_state,
             show_window,
@@ -1067,9 +1172,21 @@ pub fn run() {
             player_toggle,
             player_next,
             player_prev,
-            player_set_loop
+            player_set_loop,
+            netease::netease_api_request,
+            netease::netease_api_request_with_cookie,
+            netease::set_netease_api_base,
+            netease::get_netease_api_base,
+            netease::download_netease_song,
+            netease::save_file_dialog
         ])
         .setup(|app| {
+            let settings_path = get_settings_path();
+            if !settings_path.exists() {
+                let default_settings = AppSettings::default();
+                let _ = save_settings_sync(default_settings);
+            }
+
             let tray_menu = tauri::menu::MenuBuilder::new(app)
                 .text("show", "显示主窗口")
                 .separator()
@@ -1112,15 +1229,14 @@ pub fn run() {
                             ("to_tray".to_string(), false)
                         };
 
-                        if close_behavior == "quit" {
-                            if !first_close_hint_shown {
-                                api.prevent_close();
-                                if let Some(w) = app_handle.get_webview_window("main") {
-                                    let _ = w.emit("show-close-hint-dialog", ());
-                                }
-                            } else {
-                                std::process::exit(0);
+                        if !first_close_hint_shown {
+                            api.prevent_close();
+                            if let Some(w) = app_handle.get_webview_window("main") {
+                                let _ = w.emit("show-close-hint-dialog", ());
                             }
+                        } else if close_behavior == "quit" {
+                            save_playback_state_on_close(&app_handle);
+                            app_handle.exit(0);
                         } else {
                             api.prevent_close();
                             let _ = w.hide();

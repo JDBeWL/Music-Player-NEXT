@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { X, ListMusic } from 'lucide-vue-next';
+import { X, ListMusic, Music, Heart } from 'lucide-vue-next';
+import { getCoverUrl } from '@/utils/coverUrl';
 
 interface Track {
   id: string;
   title: string;
   artist: string;
   duration: number;
+  coverUrl?: string;
+  path: string;
 }
 
 interface Props {
@@ -14,6 +17,7 @@ interface Props {
   currentIndex: number;
   isPlaying: boolean;
   modelValue: boolean;
+  favoritePaths: Set<string>;
 }
 
 interface Emits {
@@ -21,6 +25,7 @@ interface Emits {
   (e: 'select-track', index: number): void;
   (e: 'remove-track', index: number): void;
   (e: 'clear-queue'): void;
+  (e: 'toggle-favorite', track: Track): void;
 }
 
 const props = defineProps<Props>();
@@ -59,7 +64,7 @@ function onOverlayClick() {
       </Transition>
 
       <div
-        class="queue-panel elevation-2"
+        class="queue-panel glass-surface"
         :class="{
           'queue-open': isOpen,
           'queue-closed': !isOpen,
@@ -74,8 +79,8 @@ function onOverlayClick() {
             <button v-if="queue.length > 0" class="md3-btn-text text-xs px-3 py-1" @click="emit('clear-queue')" aria-label="清空播放队列">
               清空
             </button>
-            <button class="md3-icon-btn-sm text-[var(--text-secondary)]" @click="closePanel" aria-label="关闭">
-              <X :size="16" />
+            <button class="md3-icon-btn-sm state-layer text-[var(--text-secondary)]" @click="closePanel" aria-label="关闭">
+              <X :size="18" />
             </button>
           </div>
         </div>
@@ -92,15 +97,13 @@ function onOverlayClick() {
             <div
               v-for="(track, idx) in queue"
               :key="track.id"
-              class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[var(--hover-overlay)] transition-colors group no-select state-layer"
+              class="flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-[var(--hover-overlay)] transition-colors group no-select state-layer"
               :class="{ 'bg-[var(--color-primary-container)]': idx === currentIndex }"
             >
-              <div class="w-6 text-center text-sm text-[var(--text-tertiary)]">
-                <span v-if="idx !== currentIndex || !isPlaying">{{ idx + 1 }}</span>
-                <div v-else class="flex items-center justify-center gap-0.5">
-                  <div class="w-0.5 h-3 bg-[var(--color-primary)] animate-pulse"></div>
-                  <div class="w-0.5 h-2 bg-[var(--color-primary)] animate-pulse" style="animation-delay: 0.1s"></div>
-                  <div class="w-0.5 h-3 bg-[var(--color-primary)] animate-pulse" style="animation-delay: 0.2s"></div>
+              <div class="w-10 h-10 rounded-[4px] overflow-hidden flex-shrink-0 bg-[var(--bg-tertiary)]">
+                <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="" class="w-full h-full object-cover" />
+                <div v-else class="w-full h-full flex items-center justify-center">
+                  <Music :size="16" class="text-[var(--text-tertiary)]" />
                 </div>
               </div>
               <div class="flex-1 min-w-0 cursor-pointer" @click="emit('select-track', idx)">
@@ -109,10 +112,26 @@ function onOverlayClick() {
                 </div>
                 <div class="text-xs text-[var(--text-tertiary)] truncate">{{ track.artist }}</div>
               </div>
-              <span class="text-xs text-[var(--text-tertiary)] mr-1">{{ formatTime(track.duration) }}</span>
-              <button class="md3-icon-btn-sm opacity-0 group-hover:opacity-100 text-[var(--text-disabled)] hover:text-[var(--text-primary)]" @click.stop="emit('remove-track', idx)" :aria-label="`移除歌曲 ${track.title}`">
-                <X :size="14" />
-              </button>
+              <div class="track-actions">
+                <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
+                <div class="track-action-btns opacity-0 group-hover:opacity-100">
+                  <button
+                    class="md3-icon-btn-xs state-layer"
+                    :class="favoritePaths.has(track.path) ? 'text-red-400' : ''"
+                    @click.stop="emit('toggle-favorite', track)"
+                    :aria-label="favoritePaths.has(track.path) ? '取消收藏' : '收藏'"
+                  >
+                    <Heart :size="16" :fill="favoritePaths.has(track.path) ? 'currentColor' : 'none'" />
+                  </button>
+                  <button
+                    class="md3-icon-btn-xs state-layer"
+                    @click.stop="emit('remove-track', idx)"
+                    :aria-label="`移除歌曲 ${track.title}`"
+                  >
+                    <X :size="16" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -158,7 +177,9 @@ function onOverlayClick() {
   bottom: 0;
   width: 360px;
   max-width: 90vw;
-  backdrop-filter: blur(40px);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
   display: flex;
   flex-direction: column;
   pointer-events: auto;
@@ -173,5 +194,34 @@ function onOverlayClick() {
 
 .queue-closed {
   transform: translateX(100%);
+}
+
+.track-actions {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 68px;
+  flex-shrink: 0;
+}
+
+.track-time {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+  line-height: 32px;
+}
+
+.track-action-btns {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transition: opacity 0.15s ease;
 }
 </style>

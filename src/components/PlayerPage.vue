@@ -1,51 +1,61 @@
 <script setup lang="ts">
-import { Play, Music, Plus } from 'lucide-vue-next';
-import { getCoverUrl } from '../stores/playerStore';
+import { ref, computed } from 'vue';
+import { Play, Music, Plus, Cloud, Folder } from 'lucide-vue-next';
+import { getCoverUrl } from '@/utils/coverUrl';
+import { usePlaybackStore } from '@/stores/playbackStore';
+import { usePlaylistStore } from '@/stores/playlistStore';
+import NeteasePage from './NeteasePage.vue';
 
-interface Track {
-  id: string;
-  title: string;
-  artist: string;
-  album?: string;
-  duration: number;
-  coverUrl?: string;
-}
+const playbackStore = usePlaybackStore();
+const playlistStore = usePlaylistStore();
 
-interface Playlist {
-  id: string;
-  name: string;
-  tracks: Track[];
-}
-
-interface Props {
-  playlists: Playlist[];
-  currentTrack: Track | null;
-  isLiked: boolean;
-}
-
-interface Emits {
+const emit = defineEmits<{
   (e: 'create-playlist'): void;
   (e: 'open-playlist', id: string): void;
-  (e: 'play-playlist', id: string): void;
-  (e: 'toggle-like'): void;
-}
+}>();
 
-defineProps<Props>();
-const emit = defineEmits<Emits>();
+const activeTab = ref<'local' | 'netease'>('local');
+
+const playlists = computed(() => playlistStore.playlists);
+
+function playPlaylist(id: string) {
+  const playlist = playlistStore.playlists.find(p => p.id === id);
+  if (playlist) {
+    playbackStore.loadPlaylistToQueue(playlist.tracks, id);
+  }
+}
 </script>
 
 <template>
   <section class="flex-1 overflow-hidden flex flex-col no-select" role="main" aria-label="我的音乐">
-    <div class="px-8 py-6 border-b border-[var(--border-subtle)]">
-      <h2 class="text-3xl font-bold text-[var(--text-primary)]">我的音乐</h2>
+    <div class="header-bar">
+      <h2 class="header-title">我的音乐</h2>
+      <div class="tab-group">
+        <button
+          class="tab-btn"
+          :class="{ 'tab-active': activeTab === 'local' }"
+          @click="activeTab = 'local'"
+        >
+          <Folder :size="16" />
+          <span>本地音乐</span>
+        </button>
+        <button
+          class="tab-btn"
+          :class="{ 'tab-active': activeTab === 'netease' }"
+          @click="activeTab = 'netease'"
+        >
+          <Cloud :size="16" />
+          <span>Netease</span>
+        </button>
+      </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto px-8 py-6">
+    <div v-show="activeTab === 'local'" class="flex-1 overflow-y-auto px-8 py-6">
       <div class="mb-6">
         <div class="flex items-center justify-between mb-6">
           <h3 class="text-xl font-semibold text-[var(--text-primary)]">播放列表</h3>
           <button
-            class="md3-btn-filled flex items-center gap-2"
+            class="md3-btn-filled"
             @click="emit('create-playlist')"
           >
             <Plus :size="18" />
@@ -71,8 +81,8 @@ const emit = defineEmits<Emits>();
                 <Music :size="48" class="text-[var(--text-tertiary)]" />
               </div>
               <button
-                class="absolute bottom-3 right-3 w-12 h-12 bg-[var(--color-primary)] rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 hover:brightness-110"
-                @click.stop="emit('play-playlist', playlist.id)"
+                class="absolute bottom-3 right-3 w-12 h-12 bg-[var(--color-primary)] rounded-xl flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 hover:brightness-110"
+                @click.stop="playPlaylist(playlist.id)"
               >
                 <Play :size="20" class="text-[var(--text-on-primary)] ml-0.5" fill="white" />
               </button>
@@ -89,7 +99,7 @@ const emit = defineEmits<Emits>();
           <h3 class="text-lg font-medium text-[var(--text-primary)] mb-2">还没有播放列表</h3>
           <p class="text-sm text-[var(--text-tertiary)] mb-6">创建你的第一个播放列表，开始整理喜欢的音乐</p>
           <button
-            class="md3-btn-filled flex items-center gap-2"
+            class="md3-btn-filled"
             @click="emit('create-playlist')"
           >
             <Plus :size="16" />
@@ -98,6 +108,10 @@ const emit = defineEmits<Emits>();
         </div>
       </div>
     </div>
+
+    <div v-show="activeTab === 'netease'" class="flex-1 overflow-hidden">
+      <NeteasePage />
+    </div>
   </section>
 </template>
 
@@ -105,5 +119,56 @@ const emit = defineEmits<Emits>();
 .no-select {
   user-select: none;
   -webkit-user-select: none;
+}
+
+.header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.tab-group {
+  display: flex;
+  gap: 6px;
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.tab-active {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+.tab-active:hover {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
 }
 </style>

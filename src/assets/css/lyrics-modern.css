@@ -1,6 +1,6 @@
 .lyrics-style-modern .lyrics-display {
-    mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
 }
 
 .lyrics-style-modern .lyrics {
@@ -14,31 +14,26 @@
     user-select: none;
 
     color: #64748b;
-    opacity: var(--lyrics-inactive-opacity, 0.6);
-    transform: scale(0.9);
-    filter: blur(var(--lyrics-blur-amount, 2px));
 
-    transform-origin: var(--align-origin, left center);
+    transform-origin: var(--align-origin, center center);
 
     will-change: transform, opacity, filter;
 
     transition:
-        opacity 0.25s cubic-bezier(0.33, 1, 0.68, 1),
-        transform 0.25s cubic-bezier(0.33, 1, 0.68, 1),
-        filter 0.25s linear;
+        opacity 0.3s cubic-bezier(0.33, 1, 0.68, 1),
+        transform 0.3s cubic-bezier(0.33, 1, 0.68, 1),
+        filter 0.3s ease,
+        color 0.3s ease;
 }
 
 .lyrics-style-modern .lyrics:hover {
     background-color: rgba(100, 116, 139, 0.05);
-    opacity: 0.85;
-    filter: blur(0px);
+    filter: blur(0px) !important;
+    opacity: 0.85 !important;
 }
 
 .lyrics-style-modern .lyrics.active {
     color: #0ea5e9;
-    opacity: 1;
-    transform: scale(1);
-    filter: blur(0px);
 }
 
 .lyrics-style-modern .first-line {

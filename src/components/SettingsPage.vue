@@ -1,35 +1,56 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'radix-vue';
-import { Folder, Trash2, Plus, Loader2, Trash, Music, Sliders, Info, Keyboard, FolderSearch, Database, Palette, X } from 'lucide-vue-next';
+import { Folder, Trash2, Plus, Loader2, Trash, Music, Sliders, Info, Keyboard, FolderSearch, Database, Palette, X, Cloud, Check } from 'lucide-vue-next';
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/stores/configStore';
+import { useNeteaseStore } from '@/stores/neteaseStore';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { usePlaylistStore } from '@/stores/playlistStore';
+import { LyricsParser } from '@/utils/lyricsParser';
 
 const configStore = useConfigStore();
+const neteaseStore = useNeteaseStore();
+const libraryStore = useLibraryStore();
+const playlistStore = usePlaylistStore();
 
-interface ScanProgress {
-  current: number;
-  total: number;
-  current_file: string;
-  phase: string;
+// 声明不使用的 emits 以消除警告
+defineEmits<{
+  (e: 'create-playlist'): void;
+  (e: 'open-playlist', id: string): void;
+  (e: 'add-to-playlist'): void;
+}>();
+
+const neteaseApiInput = ref('');
+const isSavingApiBase = ref(false);
+const apiSaveSuccess = ref(false);
+
+const isScanning = ref(false);
+
+const folders = computed(() => libraryStore.libraryFolders);
+const scanDepth = computed(() => libraryStore.scanDepth);
+const scanProgress = computed(() => libraryStore.scanProgress);
+
+async function addFolder() {
+  try {
+    const folderPath = await invoke<string | null>('open_folder_dialog');
+    if (folderPath) {
+      await libraryStore.addFolder(folderPath);
+    }
+  } catch (error) {
+    console.error('Failed to add folder:', error);
+  }
 }
 
-interface Props {
-  folders: string[];
-  scanDepth: number;
-  isScanning: boolean;
-  scanProgress: ScanProgress | null;
+async function scanFolders() {
+  isScanning.value = true;
+  try {
+    await libraryStore.scanLibraryFolders(playlistStore.playlists);
+    await loadCacheInfo();
+  } finally {
+    isScanning.value = false;
+  }
 }
-
-interface Emits {
-  (e: 'add-folder'): void;
-  (e: 'remove-folder', path: string): void;
-  (e: 'scan-folders'): void;
-  (e: 'update-scan-depth', depth: number): void;
-}
-
-const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
 
 const libraryPath = ref<string>('');
 const coverCacheCount = ref<number>(0);
@@ -48,7 +69,7 @@ const licenseFiles = {
     title: 'NOTICE',
     content: `Mercurial Player NEXT
 
-Copyright 2024 Mercurial
+Copyright 2026 Mercurial
 
 This project includes the following third-party components with their respective licenses:
 
@@ -335,6 +356,14 @@ function cancelRecording() {
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('click', cancelRecording);
+
+  // 初始化API Enhanced 地址输入框
+  if (neteaseStore.apiBaseUrl) {
+    neteaseApiInput.value = neteaseStore.apiBaseUrl;
+  }
+
+  loadCacheInfo();
+  loadRandomLyric(); // 加载随机歌词
 });
 
 onUnmounted(() => {
@@ -343,14 +372,89 @@ onUnmounted(() => {
 });
 
 const progressPercentage = computed(() => {
-  if (!props.scanProgress || props.scanProgress.total === 0) return 0;
-  return Math.round((props.scanProgress.current / props.scanProgress.total) * 100);
+  if (!scanProgress.value || scanProgress.value.total === 0) return 0;
+  return Math.round((scanProgress.value.current / scanProgress.value.total) * 100);
 });
 
 const progressText = computed(() => {
-  if (!props.scanProgress) return '';
-  return `${props.scanProgress.current} / ${props.scanProgress.total}`;
+  if (!scanProgress.value) return '';
+  return `${scanProgress.value.current} / ${scanProgress.value.total}`;
 });
+
+// 随机歌词引用状态
+const randomLyricData = ref<{ text: string; source: string }>({
+  text: '"最後のオンガクになるから！/成为最后的乐音！"',
+  source: '——《世界最後の音乐隊 (feat. 初音ミク)》-夏山よつぎ/ど〜ぱみん/初音ミク'
+});
+const isLoadingLyric = ref(false);
+
+// 异步加载随机歌词
+async function loadRandomLyric() {
+  const tracks = libraryStore.libraryTracks;
+  if (tracks.length === 0) return;
+
+  isLoadingLyric.value = true;
+  try {
+    const candidates = tracks.filter(t => t.hasLrc);
+    
+    if (candidates.length > 0) {
+      const trackWithLrc = candidates[Math.floor(Math.random() * candidates.length)];
+      const lrc = await libraryStore.loadLyrics(trackWithLrc);
+
+      if (lrc) {
+        const parsedLyrics = await LyricsParser.parseAsync(lrc);
+        
+        // 屏蔽制作人员信息 (支持多语言和常见变体)
+        const forbidden = [
+          '作词', '作曲', '编曲', '制作', '词:', '曲:', '编:', '演唱',
+          'Mixing', 'Mastering', 'Arrangement', 'Lyrics', 'Composed', 'Written', 
+          'Produced', 'Vocals', 'Script Info', 'Styles', 'Events', 'Timer:', 'LDDC'
+        ];
+
+        const candidateLines = parsedLyrics.filter(line => {
+          const text = (line.texts && line.texts.length > 0 ? line.texts[0] : (line.text || '')).trim();
+          if (!text) return false;
+          
+          return !forbidden.some(word => text.toLowerCase().includes(word.toLowerCase()));
+        });
+
+        if (candidateLines.length > 0) {
+          const selectedLine = candidateLines[Math.floor(Math.random() * candidateLines.length)];
+          const displayedText = selectedLine.texts && selectedLine.texts.length > 0 
+            ? selectedLine.texts.filter(t => t && t.trim()).join(' / ')
+            : (selectedLine.text || '');
+          
+          randomLyricData.value = {
+            text: `"${displayedText}"`,
+            source: `——《${trackWithLrc.title}》${trackWithLrc.artist ? `- ${trackWithLrc.artist}` : ''}`
+          };
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load random lyric:', error);
+  } finally {
+    isLoadingLyric.value = false;
+  }
+}
+
+async function saveNeteaseApiBase() {
+  const url = neteaseApiInput.value.trim();
+  if (!url) return;
+  isSavingApiBase.value = true;
+  apiSaveSuccess.value = false;
+  try {
+    await neteaseStore.updateApiBase(url);
+    neteaseApiInput.value = neteaseStore.apiBaseUrl;
+    apiSaveSuccess.value = true;
+    setTimeout(() => { apiSaveSuccess.value = false; }, 2000);
+  } catch (error) {
+    console.error('Failed to save API base:', error);
+    alert('保存失败: ' + error);
+  } finally {
+    isSavingApiBase.value = false;
+  }
+}
 
 async function loadCacheInfo() {
   isLoadingCacheInfo.value = true;
@@ -390,8 +494,6 @@ invoke<string>('get_library_path_info').then(path => {
   console.error('Failed to get library path:', error);
 });
 
-loadCacheInfo();
-
 function getFolderName(folderPath: string): string {
   const parts = folderPath.split(/[/\\]/);
   return parts[parts.length - 1] || folderPath;
@@ -420,21 +522,21 @@ function getFolderName(folderPath: string): string {
                 <div class="text-sm font-medium text-[var(--text-primary)] truncate">{{ getFolderName(folder) }}</div>
                 <div class="text-xs text-[var(--text-tertiary)] truncate">{{ folder }}</div>
               </div>
-              <button class="md3-icon-btn-sm text-[var(--text-tertiary)] hover:text-red-400" @click="emit('remove-folder', folder)" :aria-label="`移除文件夹 ${folder}`">
+              <button class="md3-icon-btn-xs state-layer text-[var(--text-tertiary)] hover:text-red-400" @click="libraryStore.removeFolder(folder)" :aria-label="`移除文件夹 ${folder}`">
                 <Trash2 :size="16" />
               </button>
             </div>
           </div>
 
           <div class="flex gap-3">
-            <button class="md3-btn-outlined flex items-center gap-2" @click="emit('add-folder')">
+            <button class="md3-btn-outlined" @click="addFolder">
               <Plus :size="16" />
               添加文件夹
             </button>
             <button
-              class="md3-btn-filled flex items-center gap-2"
+              class="md3-btn-filled"
               :disabled="isScanning || folders.length === 0"
-              @click="emit('scan-folders')"
+              @click="scanFolders"
             >
               <Loader2 v-if="isScanning" :size="16" class="animate-spin" />
               {{ isScanning ? '扫描中...' : '扫描文件夹' }}
@@ -474,7 +576,7 @@ function getFolderName(folderPath: string): string {
               :min="1"
               :max="10"
               :step="1"
-              @update:model-value="(v: number[] | undefined) => v && emit('update-scan-depth', v[0])"
+              @update:model-value="(v: number[] | undefined) => v && libraryStore.setScanDepth(v[0])"
               class="relative flex items-center select-none touch-none flex-1 h-5"
             >
               <SliderTrack class="bg-[var(--border-default)] relative grow rounded-full h-1.5">
@@ -502,7 +604,7 @@ function getFolderName(folderPath: string): string {
               <div class="flex items-center gap-3">
                 <span class="text-[var(--text-secondary)]">{{ isLoadingCacheInfo ? '加载中...' : `${coverCacheCount} 个封面` }}</span>
                 <button
-                  class="md3-btn-filled flex items-center gap-1.5"
+                  class="md3-btn-filled"
                   :disabled="isClearingCache || isLoadingCacheInfo || coverCacheCount === 0"
                   @click="clearAllCache"
                 >
@@ -514,6 +616,53 @@ function getFolderName(folderPath: string): string {
             </div>
             <div class="text-xs text-[var(--text-disabled)]">
               缓存位置: {{ coverCacheDir || '加载中...' }}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-1 flex items-center gap-2">
+            <Cloud :size="20" class="text-[var(--color-primary)]" />
+            API Enhanced
+          </h3>
+          <p class="text-sm text-[var(--text-tertiary)] mb-4">配置API Enhanced 服务地址和 IP 参数</p>
+
+          <div class="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl p-5 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-[var(--text-primary)] mb-2">API 服务地址</label>
+              <div class="flex items-center gap-3">
+                <input
+                  v-model="neteaseApiInput"
+                  type="text"
+                  placeholder="例如: https://your-api.vercel.app"
+                  class="flex-1 px-4 py-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-sm placeholder:text-[var(--text-disabled)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                />
+                <button
+                  class="md3-btn-filled flex-shrink-0"
+                  :disabled="isSavingApiBase || !neteaseApiInput.trim()"
+                  @click="saveNeteaseApiBase"
+                >
+                  <Check v-if="apiSaveSuccess" :size="14" />
+                  <Loader2 v-else-if="isSavingApiBase" :size="14" class="animate-spin" />
+                  {{ apiSaveSuccess ? '已保存' : isSavingApiBase ? '保存中...' : '保存' }}
+                </button>
+              </div>
+              <div class="text-xs text-[var(--text-disabled)] mt-2">
+                当前地址: {{ neteaseStore.apiBaseUrl || '未配置（使用默认地址）' }}
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-[var(--text-primary)] mb-2">Real IP 参数</label>
+              <div class="flex items-center gap-3">
+                <input
+                  v-model="configStore.neteaseRealIP"
+                  type="text"
+                  placeholder="默认116.25.146.177"
+                  class="flex-1 px-4 py-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-sm placeholder:text-[var(--text-disabled)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                  @blur="configStore.setNeteaseRealIP(configStore.neteaseRealIP)"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -566,7 +715,7 @@ function getFolderName(folderPath: string): string {
               </button>
             </div>
 
-            <div class="flex items-center justify-between">
+            <div v-if="configStore.lyricsDisplayMode === 'modern'" class="flex items-center justify-between">
               <div>
                 <span class="text-[var(--text-primary)] font-medium">模糊效果</span>
                 <span class="block text-sm text-[var(--text-tertiary)]">非当前歌词行的模糊效果</span>
@@ -648,6 +797,25 @@ function getFolderName(folderPath: string): string {
                 </button>
               </div>
             </div>
+
+            <div class="border-t border-[var(--border-subtle)]"></div>
+
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-[var(--text-primary)] font-medium">记住播放状态</span>
+                <span class="block text-sm text-[var(--text-tertiary)]">重新打开时恢复上次的播放进度</span>
+              </div>
+              <button
+                class="md3-switch"
+                :class="{ 'md3-switch-active': configStore.persistPlayback }"
+                @click="configStore.setPersistPlayback(!configStore.persistPlayback)"
+                role="switch"
+                :aria-checked="configStore.persistPlayback"
+                aria-label="记住播放状态"
+              >
+                <span class="md3-switch-thumb"></span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -675,18 +843,29 @@ function getFolderName(folderPath: string): string {
         </div>
 
         <div>
-          <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-1 flex items-center gap-2">
-            <Info :size="20" class="text-[var(--color-primary)]" />
-            关于
+          <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-1 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <Info :size="20" class="text-[var(--color-primary)]" />
+              关于
+            </div>
+            <button 
+              class="text-xs text-[var(--color-primary)] hover:underline bg-transparent border-none p-0 cursor-pointer flex items-center gap-1"
+              @click="loadRandomLyric"
+              title="换一句"
+            >
+              <Loader2 v-if="isLoadingLyric" :size="12" class="animate-spin" />
+              <span v-else>换一句</span>
+            </button>
           </h3>
           <div class="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl p-5 space-y-3">
-            <div class="text-center py-2">
-              <div class="text-sm text-[var(--text-secondary)] italic">"最後のオンガクになるから！/成为最后的乐音！<br/>——《世界最後の音楽隊 (feat. 初音ミク)》-夏山よつぎ/ど〜ぱみん/初音ミク"</div>
+            <div class="text-center py-2 px-4">
+              <div class="text-sm text-[var(--text-secondary)] italic leading-relaxed" style="white-space: pre-wrap;">{{ randomLyricData.text }}</div>
+              <div class="text-xs text-[var(--text-tertiary)] mt-2">{{ randomLyricData.source }}</div>
             </div>
             <div class="border-t border-[var(--border-subtle)] pt-3 space-y-2">
               <div class="flex items-center justify-between text-sm">
                 <span class="text-[var(--text-primary)]">版本</span>
-                <span class="text-[var(--text-secondary)]">0.1.0</span>
+                <span class="text-[var(--text-secondary)]">0.2.0</span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-[var(--text-primary)]">技术栈</span>
@@ -820,7 +999,7 @@ function getFolderName(folderPath: string): string {
   height: 32px;
   border: none;
   background: transparent;
-  color: var(--text-quaternary);
+  color: var(--text-disabled);
   cursor: pointer;
   border-radius: 6px;
   display: flex;
@@ -830,7 +1009,7 @@ function getFolderName(folderPath: string): string {
 }
 
 .license-close:hover {
-  background: var(--bg-hover);
+  background: var(--hover-overlay);
   color: var(--text-primary);
 }
 

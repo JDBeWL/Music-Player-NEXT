@@ -8,6 +8,8 @@ export const useConfigStore = defineStore('config', () => {
   const enableLyricsBlur = ref(true);
   const themeMode = ref<'dark' | 'light'>('dark');
   const closeBehavior = ref<'to_tray' | 'quit'>('to_tray');
+  const persistPlayback = ref(true);
+  const neteaseRealIP = ref<string>('116.25.146.177');
 
   interface KeyboardShortcut {
     code: string;
@@ -33,6 +35,47 @@ export const useConfigStore = defineStore('config', () => {
     enable_lyrics_blur: boolean;
     theme_mode: string;
     close_behavior?: string;
+    persist_playback?: boolean;
+    netease_real_ip?: string;
+  }
+
+  let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let _pendingPartial: Record<string, unknown> = {};
+
+  function flushPendingSettings() {
+    if (_saveTimer !== null) {
+      clearTimeout(_saveTimer);
+      _saveTimer = null;
+    }
+    if (Object.keys(_pendingPartial).length === 0) return;
+
+    const partial = { ..._pendingPartial };
+    _pendingPartial = {};
+
+    invoke('update_settings', { partial }).catch((error) => {
+      console.error('Failed to update settings:', error);
+      try {
+        const config = {
+          lyricsDisplayMode: lyricsDisplayMode.value,
+          showTranslation: showTranslation.value,
+          enableLyricsBlur: enableLyricsBlur.value,
+          themeMode: themeMode.value,
+          keyboardShortcuts: keyboardShortcuts.value,
+          neteaseRealIP: neteaseRealIP.value
+        };
+        localStorage.setItem('mpnext-config', JSON.stringify(config));
+      } catch (e) {
+        console.error('Failed to save config to localStorage:', e);
+      }
+    });
+  }
+
+  function scheduleSave(updates: Record<string, unknown>) {
+    Object.assign(_pendingPartial, updates);
+    if (_saveTimer !== null) {
+      clearTimeout(_saveTimer);
+    }
+    _saveTimer = setTimeout(flushPendingSettings, 300);
   }
 
   async function loadConfig() {
@@ -44,6 +87,12 @@ export const useConfigStore = defineStore('config', () => {
       themeMode.value = (settings.theme_mode as 'dark' | 'light') || 'dark';
       if (settings.close_behavior) {
         closeBehavior.value = (settings.close_behavior as 'to_tray' | 'quit') || 'to_tray';
+      }
+      if (settings.persist_playback !== undefined) {
+        persistPlayback.value = settings.persist_playback;
+      }
+      if (settings.netease_real_ip) {
+        neteaseRealIP.value = settings.netease_real_ip;
       }
     } catch (error) {
       console.error('Failed to load config from Tauri:', error);
@@ -63,47 +112,18 @@ export const useConfigStore = defineStore('config', () => {
         console.error('Failed to load config from localStorage:', e);
       }
     }
-    // 应用主题
     applyTheme();
   }
 
   async function saveConfig() {
-    try {
-      const current = await invoke<{
-        volume: number;
-        lyrics_display_mode: string;
-        show_translation: boolean;
-        enable_lyrics_blur: boolean;
-        theme_mode: string;
-        last_played_track_id: string | null;
-        last_played_playlist_id: string | null;
-      }>('get_settings');
-
-      const settings = {
-        volume: current.volume,
-        lyrics_display_mode: lyricsDisplayMode.value,
-        show_translation: showTranslation.value,
-        enable_lyrics_blur: enableLyricsBlur.value,
-        theme_mode: themeMode.value,
-        last_played_track_id: current.last_played_track_id,
-        last_played_playlist_id: current.last_played_playlist_id
-      };
-      await invoke('save_settings', { settings });
-    } catch (error) {
-      console.error('Failed to save config to Tauri:', error);
-      try {
-        const config = {
-          lyricsDisplayMode: lyricsDisplayMode.value,
-          showTranslation: showTranslation.value,
-          enableLyricsBlur: enableLyricsBlur.value,
-          themeMode: themeMode.value,
-          keyboardShortcuts: keyboardShortcuts.value
-        };
-        localStorage.setItem('mpnext-config', JSON.stringify(config));
-      } catch (e) {
-        console.error('Failed to save config to localStorage:', e);
-      }
-    }
+    scheduleSave({
+      lyrics_display_mode: lyricsDisplayMode.value,
+      show_translation: showTranslation.value,
+      enable_lyrics_blur: enableLyricsBlur.value,
+      theme_mode: themeMode.value,
+      persist_playback: persistPlayback.value,
+      netease_real_ip: neteaseRealIP.value
+    });
   }
 
   const setLyricsDisplayMode = async (mode: 'modern' | 'classic') => {
@@ -158,12 +178,24 @@ export const useConfigStore = defineStore('config', () => {
     }
   };
 
+  const setPersistPlayback = async (enabled: boolean) => {
+    persistPlayback.value = enabled;
+    await saveConfig();
+  };
+
+  const setNeteaseRealIP = async (ip: string) => {
+    neteaseRealIP.value = ip;
+    await saveConfig();
+  };
+
   return {
     lyricsDisplayMode,
     showTranslation,
     enableLyricsBlur,
     themeMode,
     closeBehavior,
+    persistPlayback,
+    neteaseRealIP,
     keyboardShortcuts,
     setLyricsDisplayMode,
     toggleTranslation,
@@ -172,6 +204,8 @@ export const useConfigStore = defineStore('config', () => {
     setThemeMode,
     setKeyboardShortcut,
     setCloseBehavior,
+    setPersistPlayback,
+    setNeteaseRealIP,
     loadConfig,
     saveConfig
   };

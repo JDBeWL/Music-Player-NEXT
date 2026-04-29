@@ -1,13 +1,4 @@
-export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
-
-export interface AudioTrack {
-  id: string;
-  path: string;
-  title: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-}
+import type { AudioTrack, PlaybackState } from '@/types';
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type ProgressCallback = (currentTime: number, duration: number) => void;
@@ -29,6 +20,7 @@ export class NativeAudioPlayer {
 
   constructor() {
     this.audio = new Audio();
+    this.audio.volume = 0.5;
     this.setupEventListeners();
   }
 
@@ -87,6 +79,8 @@ export class NativeAudioPlayer {
 
       // 等待可以播放但不自动播放
       await new Promise<void>((resolve, reject) => {
+        let cleanup = () => {};
+
         const onCanPlay = () => {
           cleanup();
           resolve();
@@ -95,7 +89,8 @@ export class NativeAudioPlayer {
           cleanup();
           reject(new Error('Failed to load audio'));
         };
-        const cleanup = () => {
+
+        const removeListeners = () => {
           this.audio.removeEventListener('canplay', onCanPlay);
           this.audio.removeEventListener('error', onError);
         };
@@ -104,10 +99,15 @@ export class NativeAudioPlayer {
         this.audio.addEventListener('error', onError, { once: true });
 
         // 超时处理
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
           cleanup();
-          resolve();
+          reject(new Error('Audio load timeout'));
         }, 5000);
+
+        cleanup = () => {
+          clearTimeout(timeoutId);
+          removeListeners();
+        };
       });
 
       // 等待 duration 可用
@@ -246,7 +246,7 @@ export class NativeAudioPlayer {
       this.progressListeners.forEach(cb => {
         cb(this.getCurrentTime(), this.getDuration());
       });
-    }, 100);
+    }, 250);
   }
 
   private stopProgressTracking(): void {

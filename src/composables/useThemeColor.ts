@@ -1,4 +1,10 @@
 import { ref } from 'vue';
+import {
+  QuantizerCelebi,
+  Score,
+  Hct,
+  TonalPalette,
+} from '@material/material-color-utilities';
 
 export interface ThemeColors {
   primary: string;
@@ -7,179 +13,237 @@ export interface ThemeColors {
   rgb: [number, number, number];
 }
 
-const currentTheme = ref<ThemeColors>({
+const DEFAULT_THEME: ThemeColors = {
   primary: '#91c4c7',
   primaryDark: '#6aadb1',
   primaryLight: '#b8dbdd',
   rgb: [145, 196, 199],
-});
+};
 
-export function useThemeColor() {
-  // RGB 转 HSL
-  const rgbToHsl = (r: number, g: number, b: number): [number, number, number] => {
-    r /= 255;
-    g /= 255;
-    b /= 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0, s = 0;
-    const l = (max + min) / 2;
+const currentTheme = ref<ThemeColors>({ ...DEFAULT_THEME });
 
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max) {
-        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-        case g: h = ((b - r) / d + 2) / 6; break;
-        case b: h = ((r - g) / d + 4) / 6; break;
+// LRU Cache with max size
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  constructor(private maxSize: number) {}
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
       }
     }
-    return [h * 360, s * 100, l * 100];
-  };
+    this.cache.set(key, value);
+  }
 
-  // HSL 转 RGB
-  const hslToRgb = (h: number, s: number, l: number): [number, number, number] => {
-    h /= 360;
-    s /= 100;
-    l /= 100;
-    let r, g, b;
+  clear(): void {
+    this.cache.clear();
+  }
+}
 
-    if (s === 0) {
-      r = g = b = l;
-    } else {
-      const hue2rgb = (p: number, q: number, t: number) => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1/3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
-    }
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-  };
+const colorCache = new LRUCache<string, ThemeColors>(100);
 
+// In-flight request deduplication
+const pendingExtractions = new Map<string, Promise<ThemeColors | null>>();
+
+// Convert HCT to RGB array
+function hctToRgb(hct: Hct): [number, number, number] {
+  return [
+    Math.round(hct.toInt() >> 16 & 0xff),
+    Math.round(hct.toInt() >> 8 & 0xff),
+    Math.round(hct.toInt() & 0xff),
+  ];
+}
+
+// Convert RGB to hex string
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map(x => x.toString(16).padStart(2, '0')).join('')}`;
+}
+
+export function useThemeColor() {
   const extractColorFromImage = async (imageUrl: string): Promise<ThemeColors | null> => {
-    try {
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
+    const cached = colorCache.get(imageUrl);
+    if (cached !== undefined) {
+      return cached;
+    }
 
-      return new Promise((resolve) => {
-        img.onload = () => {
-          try {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-              resolve(null);
-              return;
-            }
+    const pending = pendingExtractions.get(imageUrl);
+    if (pending) {
+      return pending;
+    }
 
-            // 缩小图片以提高性能
-            const size = 100;
-            canvas.width = size;
-            canvas.height = size;
-            ctx.drawImage(img, 0, 0, size, size);
+    const extractionPromise = (async (): Promise<ThemeColors | null> => {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
 
-            const imageData = ctx.getImageData(0, 0, size, size);
-            const pixels = imageData.data;
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('Image load failed'));
+          img.src = imageUrl;
+        });
 
-            // 收集所有颜色并计算饱和度
-            const colors: Array<{r: number, g: number, b: number, saturation: number, count: number}> = [];
-            const colorMap = new Map<string, number>();
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) {
+          return null;
+        }
 
-            for (let i = 0; i < pixels.length; i += 4) {
-              const r = pixels[i];
-              const g = pixels[i + 1];
-              const b = pixels[i + 2];
-              const a = pixels[i + 3];
+        // Use smaller size for performance while maintaining accuracy
+        const size = 128;
+        canvas.width = size;
+        canvas.height = size;
+        ctx.drawImage(img, 0, 0, size, size);
 
-              // 跳过透明和过暗/过亮的像素
-              if (a < 128) continue;
-              const brightness = (r + g + b) / 3;
-              if (brightness < 30 || brightness > 240) continue;
+        const imageData = ctx.getImageData(0, 0, size, size);
+        const pixels = imageData.data;
 
-              const [, s] = rgbToHsl(r, g, b);
+        // Build pixel array for quantizer (filter out transparent and near-gray pixels)
+        const pixelArray: number[] = [];
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          const a = pixels[i + 3];
 
-              // 只保留饱和度较高的颜色
-              if (s < 20) continue;
+          // Skip transparent pixels
+          if (a < 128) continue;
 
-              const key = `${Math.floor(r/10)},${Math.floor(g/10)},${Math.floor(b/10)}`;
-              colorMap.set(key, (colorMap.get(key) || 0) + 1);
+          // Skip near-gray pixels (low saturation)
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          if (max - min < 10) continue;
 
-              const existing = colors.find(c =>
-                Math.abs(c.r - r) < 30 &&
-                Math.abs(c.g - g) < 30 &&
-                Math.abs(c.b - b) < 30
-              );
+          pixelArray.push((r << 16) | (g << 8) | b);
+        }
 
-              if (existing) {
-                existing.count++;
-              } else {
-                colors.push({ r, g, b, saturation: s, count: 1 });
-              }
-            }
+        if (pixelArray.length === 0) {
+          return null;
+        }
 
-            if (colors.length === 0) {
-              resolve(null);
-              return;
-            }
+        // Use MD3 QuantizerCelebi to extract color clusters
+        const resultMap = QuantizerCelebi.quantize(pixelArray, 128);
 
-            // 选择饱和度最高且出现频率较高的颜色
-            colors.sort((a, b) => (b.saturation * b.count) - (a.saturation * a.count));
-            const dominant = colors[0];
+        if (resultMap.size === 0) {
+          return null;
+        }
 
-            const [h, s, l] = rgbToHsl(dominant.r, dominant.g, dominant.b);
+        // Use MD3 Score to find the best source color
+        const scoredColors = Score.score(resultMap);
+        if (scoredColors.length === 0) {
+          return null;
+        }
 
-            // 确保颜色足够鲜艳
-            const adjustedS = Math.max(s, 50);
-            const adjustedL = Math.min(Math.max(l, 45), 65);
+        const sourceColorArgb = scoredColors[0];
+        const sourceHct = Hct.fromInt(sourceColorArgb);
 
-            const [r, g, b] = hslToRgb(h, adjustedS, adjustedL);
-            const [rDark, gDark, bDark] = hslToRgb(h, adjustedS, Math.max(adjustedL - 15, 30));
-            const [rLight, gLight, bLight] = hslToRgb(h, adjustedS, Math.min(adjustedL + 15, 75));
+        // Create tonal palette from source color
+        const palette = TonalPalette.fromHct(sourceHct);
 
-            const theme: ThemeColors = {
-              primary: `rgb(${r}, ${g}, ${b})`,
-              primaryDark: `rgb(${rDark}, ${gDark}, ${bDark})`,
-              primaryLight: `rgb(${rLight}, ${gLight}, ${bLight})`,
-              rgb: [r, g, b],
-            };
+        // MD3 tonal palette: 0-100 tone scale
+        // Primary: tone 40 (main color)
+        // On Primary: tone 100 (text on primary)
+        // Primary Container: tone 90
+        // On Primary Container: tone 10
+        // We use tone 40 for primary, tone 30 for dark variant, tone 50 for light variant
+        const primaryHct = palette.getHct(40);
+        const primaryDarkHct = palette.getHct(30);
+        const primaryLightHct = palette.getHct(50);
 
-            resolve(theme);
-          } catch (error) {
-            console.error('Failed to extract color:', error);
-            resolve(null);
-          }
+        const [r, g, b] = hctToRgb(primaryHct);
+        const [rDark, gDark, bDark] = hctToRgb(primaryDarkHct);
+        const [rLight, gLight, bLight] = hctToRgb(primaryLightHct);
+
+        const theme: ThemeColors = {
+          primary: rgbToHex(r, g, b),
+          primaryDark: rgbToHex(rDark, gDark, bDark),
+          primaryLight: rgbToHex(rLight, gLight, bLight),
+          rgb: [r, g, b],
         };
 
-        img.onerror = () => resolve(null);
-        img.src = imageUrl;
-      });
-    } catch (error) {
-      console.error('Failed to load image:', error);
-      return null;
-    }
+        colorCache.set(imageUrl, theme);
+        return theme;
+      } catch (error) {
+        console.error('Failed to extract color:', error);
+        return null;
+      } finally {
+        pendingExtractions.delete(imageUrl);
+      }
+    })();
+
+    pendingExtractions.set(imageUrl, extractionPromise);
+    return extractionPromise;
   };
 
   const applyTheme = (theme: ThemeColors) => {
     currentTheme.value = theme;
-    document.documentElement.style.setProperty('--color-primary', theme.primary);
-    document.documentElement.style.setProperty('--color-primary-dark', theme.primaryDark);
-    document.documentElement.style.setProperty('--color-primary-light', theme.primaryLight);
+    const root = document.documentElement.style;
+    root.setProperty('--color-primary', theme.primary);
+    root.setProperty('--color-primary-dark', theme.primaryDark);
+    root.setProperty('--color-primary-light', theme.primaryLight);
+    root.setProperty('--color-on-primary-container', theme.primary);
+
+    const [r, g, b] = theme.rgb;
+    root.setProperty('--color-primary-container', `rgba(${r}, ${g}, ${b}, 0.15)`);
   };
 
-  const updateThemeFromCover = async (coverUrl: string | undefined) => {
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let abortController: AbortController | null = null;
+
+  const updateThemeFromCover = (coverUrl: string | undefined, immediate: boolean = false) => {
     if (!coverUrl) return;
-    
-    const theme = await extractColorFromImage(coverUrl);
-    if (theme) {
-      applyTheme(theme);
+
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
     }
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+
+    const doExtract = async () => {
+      const controller = new AbortController();
+      abortController = controller;
+
+      try {
+        const theme = await extractColorFromImage(coverUrl);
+        if (theme && !controller.signal.aborted) {
+          applyTheme(theme);
+        }
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          console.error('Theme extraction error:', error);
+        }
+      }
+    };
+
+    if (immediate) {
+      doExtract();
+    } else {
+      debounceTimer = setTimeout(doExtract, 150);
+    }
+  };
+
+  const resetToDefault = () => {
+    applyTheme({ ...DEFAULT_THEME });
+  };
+
+  const clearCache = () => {
+    colorCache.clear();
   };
 
   return {
@@ -187,6 +251,7 @@ export function useThemeColor() {
     extractColorFromImage,
     applyTheme,
     updateThemeFromCover,
+    resetToDefault,
+    clearCache,
   };
 }
-

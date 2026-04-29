@@ -1,5 +1,5 @@
 <template>
-    <div class="lyrics-wrapper" :class="`lyrics-style-${configStore.lyricsDisplayMode || 'modern'}`" :style="`--lyrics-blur-amount: ${configStore.enableLyricsBlur ? 2 : 0}px; --lyrics-inactive-opacity: ${configStore.enableLyricsBlur ? 0.6 : 0.7}`">
+    <div class="lyrics-wrapper" :class="`lyrics-style-${configStore.lyricsDisplayMode || 'modern'}`">
         <div class="lyrics-display" ref="containerRef" @scroll="handleScroll" @mouseenter="isHovering = true" @mouseleave="isHovering = false">
             <div v-if="loading" class="loading">加载中...</div>
 
@@ -17,13 +17,7 @@
                 <div class="lyrics-spacer-up"></div>
 
                 <div class="lyrics" v-for="(line, index) in lyrics" :key="index" :class="{ active: isActive(index) }"
-                    :style="{
-                        // 根据配置的对齐方式，动态调整缩放锚点 (左/中/右)，防止放大时位移
-                        '--align-origin': 'center center',
-                        // 应用用户配置的字体和对齐
-                        textAlign: 'center',
-                        fontFamily: 'inherit'
-                    }" @click="handleLyricClick(line.time, index)">
+                    :style="getLyricLineStyle(index)" @click="handleLyricClick(line.time, index)">
                     <template v-if="line.karaoke && isActive(index)">
                         <div class="first-line karaoke-line"><span v-for="(word, idx) in line.words" :key="idx" class="karaoke-text"
                                 :class="{ 'active': isWordActive(word), 'animating': isWordAnimating(word) }" :style="getKaraokeStyle(word)">{{ word.text }}</span></div>
@@ -43,7 +37,7 @@
 </template>
 
 <script>
-import { usePlayerStore } from '@/stores/playerStore';
+import { usePlaybackStore } from '@/stores/playbackStore';
 import { useConfigStore } from '@/stores/configStore';
 import { nextTick, ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { useLyrics } from '@/composables/useLyrics';
@@ -53,7 +47,7 @@ import '@/assets/css/lyrics-classic.css';
 export default {
     name: "LyricsDisplay",
     setup() {
-        const playerStore = usePlayerStore();
+        const playbackStore = usePlaybackStore();
         const configStore = useConfigStore();
         const containerRef = ref(null);
 
@@ -65,7 +59,7 @@ export default {
         const activeIndex = ref(-1);
         
         // 是否有当前播放的曲目
-        const hasCurrentTrack = computed(() => !!playerStore.currentTrack);
+        const hasCurrentTrack = computed(() => !!playbackStore.currentTrack);
 
         // --- 视觉时间系统 ---
         const visualTime = ref(0);
@@ -78,14 +72,14 @@ export default {
             if (rafId) return; // 防止重复启动
             lastFrameTime = 0; // 重置时间戳
             // 启动时先同步到真实时间
-            visualTime.value = playerStore.currentTime;
+            visualTime.value = playbackStore.currentTime;
             
             const animate = (timestamp) => {
                 if (!lastFrameTime) lastFrameTime = timestamp;
                 const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1); // 限制最大 deltaTime 为 100ms
                 lastFrameTime = timestamp;
 
-                const realTime = playerStore.currentTime;
+                const realTime = playbackStore.currentTime;
                 
                 // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移
                 const diff = visualTime.value - realTime; // 正值表示视觉领先，负值表示落后
@@ -117,18 +111,18 @@ export default {
         };
         
         // 监听播放状态，控制动画循环的启停
-        watch(() => playerStore.isPlaying, (isPlaying) => {
+        watch(() => playbackStore.isPlaying, (isPlaying) => {
             if (isPlaying) {
                 startAnimationLoop();
             } else {
                 stopAnimationLoop();
                 // 暂停时同步到真实时间
-                visualTime.value = playerStore.currentTime;
+                visualTime.value = playbackStore.currentTime;
             }
         }, { immediate: true });
 
         // 监听真实时间跳变（如拖拽进度条），立即同步
-        watch(() => playerStore.currentTime, (newTime, oldTime) => {
+        watch(() => playbackStore.currentTime, (newTime, oldTime) => {
             // 检测 seek 操作：时间跳变超过 1.5s（正常播放每次只增加 0.5s）
             // 或者时间倒退（说明用户往回拖了）
             const jump = newTime - oldTime;
@@ -138,24 +132,20 @@ export default {
         });
 
         // 监听歌曲切换，立即重置 visualTime 和滚动位置
-        watch(() => playerStore.currentTrack?.path, () => {
+        watch(() => playbackStore.currentTrack?.path, () => {
             // 标记正在切换歌曲，阻止自动滚动
             isTrackChanging.value = true;
 
             // 切歌时立即同步到当前时间（通常是 0）
-            visualTime.value = playerStore.currentTime;
+            visualTime.value = playbackStore.currentTime;
             activeIndex.value = -1;
 
             // 重置歌词滚动位置到顶部
             nextTick(() => {
+                cancelScrollAnimation();
                 if (containerRef.value) {
-                    containerRef.value.style.scrollBehavior = 'auto';
                     containerRef.value.scrollTop = 0;
                     requestAnimationFrame(() => {
-                        if (containerRef.value) {
-                            containerRef.value.style.scrollBehavior = 'smooth';
-                        }
-                        // 1秒后解除切换状态，允许自动滚动
                         setTimeout(() => {
                             isTrackChanging.value = false;
                         }, 1000);
@@ -181,7 +171,7 @@ export default {
             lastCalcTime = now;
             
             // 应用歌词偏移
-            const offset = playerStore.lyricsOffset || 0;
+            const offset = playbackStore.lyricsOffset || 0;
             const currentTime = time - offset;
             
             // 二分查找当前歌词索引
@@ -198,28 +188,81 @@ export default {
             
             if (idx !== activeIndex.value) {
                 activeIndex.value = idx;
-                playerStore.currentLyricIndex = idx; // 同步到 store
+                playbackStore.setCurrentLyricIndex(idx);
             }
         });
 
         // --- 样式计算逻辑 ---
         const isActive = (index) => index === activeIndex.value;
 
+        const getLyricLineStyle = (index) => {
+            const distance = Math.abs(index - activeIndex.value);
+            const isModern = (configStore.lyricsDisplayMode || 'modern') === 'modern';
+
+            if (isModern) {
+                const blurEnabled = configStore.enableLyricsBlur;
+                let blur, opacity, scale;
+
+                if (distance === 0) {
+                    blur = 0;
+                    opacity = 1;
+                    scale = 1;
+                } else if (blurEnabled) {
+                    blur = Math.min(8, distance * 1.8);
+                    opacity = Math.max(0.25, 1 - distance * 0.13);
+                    scale = Math.max(0.88, 1 - distance * 0.02);
+                } else {
+                    blur = 0;
+                    opacity = Math.max(0.45, 1 - distance * 0.08);
+                    scale = Math.max(0.92, 1 - distance * 0.012);
+                }
+
+                return {
+                    '--align-origin': 'center center',
+                    '--lyric-blur': `${blur}px`,
+                    '--lyric-opacity': opacity,
+                    '--lyric-scale': scale,
+                    textAlign: 'center',
+                    fontFamily: 'inherit',
+                    filter: `blur(var(--lyric-blur))`,
+                    opacity: 'var(--lyric-opacity)',
+                    transform: `scale(var(--lyric-scale))`,
+                };
+            } else {
+                if (distance === 0) {
+                    return {
+                        '--align-origin': 'center center',
+                        textAlign: 'center',
+                        fontFamily: 'inherit',
+                    };
+                }
+
+                const opacity = distance <= 1 ? 0.6 : Math.max(0.35, 0.6 - (distance - 1) * 0.08);
+                return {
+                    '--align-origin': 'center center',
+                    '--lyric-opacity': opacity,
+                    textAlign: 'center',
+                    fontFamily: 'inherit',
+                    opacity: 'var(--lyric-opacity)',
+                };
+            }
+        };
+
         const isWordActive = (word) => {
-            const offset = playerStore.lyricsOffset || 0;
+            const offset = playbackStore.lyricsOffset || 0;
             const t = visualTime.value - offset;
             return t >= word.start && t < word.end;
         };
 
         const isWordAnimating = (word) => {
-            const offset = playerStore.lyricsOffset || 0;
+            const offset = playbackStore.lyricsOffset || 0;
             const t = visualTime.value - offset;
             return t >= word.start && t <= word.end;
         };
 
         // 计算卡拉OK单词的填充进度 (0% - 100%)
         const getKaraokeStyle = (word) => {
-            const offset = playerStore.lyricsOffset || 0;
+            const offset = playbackStore.lyricsOffset || 0;
             const t = visualTime.value - offset;
             if (t >= word.end) return { '--karaoke-progress': '100%' };
             if (t < word.start) return { '--karaoke-progress': '0%' };
@@ -231,22 +274,70 @@ export default {
         };
 
         // --- 滚动控制 ---
-        const isAutoScrolling = ref(false); // 标记是否正在自动滚动
-        const isHovering = ref(false);      // 标记鼠标是否悬停
-        const isTrackChanging = ref(false); // 标记是否正在切换歌曲
+        const isAutoScrolling = ref(false);
+        const isHovering = ref(false);
+        const isTrackChanging = ref(false);
         let scrollTimeout = null;
+        let scrollAnimationId = null;
+        let scrollAnimationStart = 0;
+        let scrollAnimationFrom = 0;
+        let scrollAnimationTo = 0;
+        let scrollAnimationDuration = 0;
+
+        const easeOutExpo = (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+        const cancelScrollAnimation = () => {
+            if (scrollAnimationId) {
+                cancelAnimationFrame(scrollAnimationId);
+                scrollAnimationId = null;
+            }
+        };
+
+        const animatedScrollTo = (targetScroll, duration = 600, immediate = false, easing = easeOutExpo) => {
+            if (!containerRef.value) return;
+
+            cancelScrollAnimation();
+
+            const container = containerRef.value;
+
+            if (immediate) {
+                container.scrollTop = targetScroll;
+                return;
+            }
+
+            scrollAnimationFrom = container.scrollTop;
+            scrollAnimationTo = targetScroll;
+            scrollAnimationDuration = duration;
+            scrollAnimationStart = 0;
+            isAutoScrolling.value = true;
+
+            const animateScroll = (timestamp) => {
+                if (!scrollAnimationStart) scrollAnimationStart = timestamp;
+                const elapsed = timestamp - scrollAnimationStart;
+                const progress = Math.min(elapsed / scrollAnimationDuration, 1);
+                const eased = easing(progress);
+
+                container.scrollTop = scrollAnimationFrom + (scrollAnimationTo - scrollAnimationFrom) * eased;
+
+                if (progress < 1) {
+                    scrollAnimationId = requestAnimationFrame(animateScroll);
+                } else {
+                    scrollAnimationId = null;
+                    setTimeout(() => { isAutoScrolling.value = false; }, 50);
+                }
+            };
+
+            scrollAnimationId = requestAnimationFrame(animateScroll);
+        };
 
         const handleScroll = () => {
-             // 如果是自动滚动触发的事件，忽略
              if (isAutoScrolling.value) return; 
-             
-             // 只有当鼠标悬停在歌词区域时，才认为是用户的主动滚动
              if (!isHovering.value) return;
 
-             // 用户手动滚动
              isUserScroll.value = true;
+             cancelScrollAnimation();
              
-             // 用户停止滚动 2.5s 后恢复自动跟随
              if (scrollTimeout) clearTimeout(scrollTimeout);
              scrollTimeout = setTimeout(() => {
                  isUserScroll.value = false;
@@ -257,42 +348,33 @@ export default {
             if (!containerRef.value) return;
             
             const idx = targetIndex !== -1 ? targetIndex : activeIndex.value;
-            // 如果索引无效或列表为空
             if (idx === -1 || !lyrics.value.length) return;
 
             const container = containerRef.value;
-            // 直接通过索引查找元素，比 querySelector(".active") 更可靠
             const lyricElements = container.querySelectorAll('.lyrics');
             if (!lyricElements || !lyricElements[idx]) return;
             
             const activeEl = lyricElements[idx];
+            const isModern = (configStore.lyricsDisplayMode || 'modern') === 'modern';
 
             nextTick(() => {
                 const containerH = container.clientHeight;
                 const elTop = activeEl.offsetTop;
                 const elH = activeEl.clientHeight;
-                let targetScroll;
-                // 更加激进的滚动位置
-                const offsetRatio = 0.5;
-                targetScroll = elTop - (containerH * offsetRatio) + (elH / 2);
-
-                targetScroll = Math.max(0, targetScroll);
-                
-                // 标记开始自动滚动，防止 handleScroll 误判
-                isAutoScrolling.value = true;
+                const targetScroll = Math.max(0, elTop - (containerH * 0.5) + (elH / 2));
 
                 if (immediate || isUserClick) {
-                    container.style.scrollBehavior = 'auto';
-                    container.scrollTop = targetScroll;
-                    requestAnimationFrame(() => {
-                         container.style.scrollBehavior = 'smooth';
-                         // 稍作延迟释放标志
-                         setTimeout(() => isAutoScrolling.value = false, 100);
-                    });
+                    animatedScrollTo(targetScroll, 0, true);
+                } else if (isModern) {
+                    const currentScroll = container.scrollTop;
+                    const distance = Math.abs(targetScroll - currentScroll);
+                    const duration = Math.max(300, Math.min(700, distance * 0.6));
+                    animatedScrollTo(targetScroll, duration, false, easeOutExpo);
                 } else {
-                    container.style.scrollBehavior = 'smooth';
-                    container.scrollTop = targetScroll;
-                    setTimeout(() => isAutoScrolling.value = false, 500);
+                    const currentScroll = container.scrollTop;
+                    const distance = Math.abs(targetScroll - currentScroll);
+                    const duration = Math.max(200, Math.min(400, distance * 0.4));
+                    animatedScrollTo(targetScroll, duration, false, easeOutCubic);
                 }
             });
         };
@@ -311,11 +393,11 @@ export default {
         watch(loading, (newVal) => {
             if (!newVal) {
                 // 歌词加载完成后，强制同步 visualTime
-                visualTime.value = playerStore.currentTime;
+                visualTime.value = playbackStore.currentTime;
                 // 切换歌曲期间不自动滚动
                 if (isTrackChanging.value) return;
                 // 只有当播放时间大于2秒时才自动滚动，避免切歌时从顶部跳走
-                if (playerStore.currentTime > 2) {
+                if (playbackStore.currentTime > 2) {
                     nextTick(() => scrollToActiveLyric(true));
                 }
             }
@@ -329,10 +411,10 @@ export default {
             isUserScroll.value = false;
             if (scrollTimeout) clearTimeout(scrollTimeout);
 
-            await playerStore.seek(time);
+            await playbackStore.seek(time);
             
             visualTime.value = time;
-            const forceSync = () => { visualTime.value = playerStore.currentTime; };
+            const forceSync = () => { visualTime.value = playbackStore.currentTime; };
             requestAnimationFrame(forceSync);
             requestAnimationFrame(() => requestAnimationFrame(forceSync));
 
@@ -345,11 +427,11 @@ export default {
 
         // 歌词偏移控制
         const adjustOffset = (delta) => {
-            playerStore.adjustLyricsOffset(delta);
+            playbackStore.adjustLyricsOffset(delta);
         };
         
         const resetOffset = () => {
-            playerStore.resetLyricsOffset();
+            playbackStore.resetLyricsOffset();
         };
         
         const formatOffset = (offset) => {
@@ -365,23 +447,20 @@ export default {
 
         onUnmounted(() => {
         stopAnimationLoop();
-        // 清理 scrollTimeout
+        cancelScrollAnimation();
         if (scrollTimeout) {
             clearTimeout(scrollTimeout);
             scrollTimeout = null;
         }
-        // 清理 resize 事件监听器
         window.removeEventListener("resize", handleResize);
-        // 清理 useLyrics composable
         cleanupLyrics();
-        // 清理任何其他可能的定时器或事件监听器
         isUserScroll.value = false;
         isAutoScrolling.value = false;
     });
 
         return {
-            lyrics, loading, containerRef, configStore, lyricsSource, hasCurrentTrack, playerStore,
-            isActive, isWordActive, isWordAnimating, getKaraokeStyle, handleLyricClick,
+            lyrics, loading, containerRef, configStore, lyricsSource, hasCurrentTrack, playbackStore,
+            isActive, getLyricLineStyle, isWordActive, isWordAnimating, getKaraokeStyle, handleLyricClick,
             handleScroll, isHovering
         };
     }
@@ -402,7 +481,6 @@ export default {
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: none;
-    scroll-behavior: smooth;
 }
 
 .lyrics-display::-webkit-scrollbar {

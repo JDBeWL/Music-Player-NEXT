@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ChevronDown, Music } from 'lucide-vue-next';
 import LyricsDisplay from './LyricsDisplay.vue';
-import { getCoverUrl } from '../stores/playerStore';
+import { getCoverUrl } from '@/utils/coverUrl';
 
 interface Track {
   id: string;
@@ -181,7 +181,7 @@ function onWheel(e: WheelEvent) {
 
       <div
         ref="drawerRef"
-        class="drawer-panel elevation-2"
+        class="drawer-panel glass-surface"
         :class="{
           'drawer-open': isOpen && !isDragging,
           'drawer-closed': !isOpen && !isDragging,
@@ -212,7 +212,7 @@ function onWheel(e: WheelEvent) {
         <div v-if="currentTrack" class="drawer-content">
           <div class="flex flex-col items-center justify-center" style="flex: 0 0 40%; max-width: 40%; padding: 0 2% 0 8%; box-sizing: border-box;">
             <div class="w-full" style="max-height: 70vh;">
-              <div class="aspect-square rounded-2xl overflow-hidden shadow-2xl mb-8 elevation-3" style="max-height: 100%; width: auto; margin: 0 auto;">
+              <div class="aspect-square rounded-2xl overflow-hidden shadow-2xl mb-8" style="max-height: 100%; width: auto; margin: 0 auto;">
                 <img
                   v-if="currentTrack.coverUrl"
                   :src="getCoverUrl(currentTrack.coverUrl)"
@@ -285,12 +285,17 @@ function onWheel(e: WheelEvent) {
   right: 0;
   bottom: 0;
   height: 100%;
-  backdrop-filter: blur(40px);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   pointer-events: auto;
   will-change: transform;
+}
+
+.glass-surface {
+  background: var(--glass-bg);
 }
 
 .drawer-transitioning {
