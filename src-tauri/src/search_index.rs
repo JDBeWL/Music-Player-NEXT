@@ -15,6 +15,7 @@ pub struct SearchIndex {
     writer: Arc<Mutex<IndexWriter>>,
     title_field: Field,
     artist_field: Field,
+    artists_field: Field,
     album_field: Field,
     path_field: Field,
     id_field: Field,
@@ -39,6 +40,7 @@ impl SearchIndex {
 
         let title_field = schema_builder.add_text_field("title", text_options.clone());
         let artist_field = schema_builder.add_text_field("artist", text_options.clone());
+        let artists_field = schema_builder.add_text_field("artists", text_options.clone());
         let album_field = schema_builder.add_text_field("album", text_options.clone());
 
         let string_options = TextOptions::default()
@@ -110,6 +112,7 @@ impl SearchIndex {
             writer: Arc::new(Mutex::new(writer)),
             title_field,
             artist_field,
+            artists_field,
             album_field,
             path_field,
             id_field,
@@ -127,7 +130,7 @@ impl SearchIndex {
         let path_term = tantivy::Term::from_field_text(self.path_field, &track.path);
         writer.delete_term(path_term);
 
-        let doc = doc!(
+        let mut doc = doc!(
             self.title_field => track.title.clone(),
             self.artist_field => track.artist.clone(),
             self.album_field => track.album.clone(),
@@ -139,6 +142,9 @@ impl SearchIndex {
             self.cover_id_field => track.cover_id.clone().unwrap_or_default(),
             self.has_lrc_field => if track.has_lrc { "1" } else { "0" }.to_string(),
         );
+        for a in &track.artists {
+            doc.add_text(self.artists_field, a);
+        }
 
         writer.add_document(doc).map_err(|e| e.to_string())?;
         Ok(())
@@ -150,7 +156,7 @@ impl SearchIndex {
             let path_term = tantivy::Term::from_field_text(self.path_field, &track.path);
             writer.delete_term(path_term);
 
-            let doc = doc!(
+            let mut doc = doc!(
                 self.title_field => track.title.clone(),
                 self.artist_field => track.artist.clone(),
                 self.album_field => track.album.clone(),
@@ -162,6 +168,9 @@ impl SearchIndex {
                 self.cover_id_field => track.cover_id.clone().unwrap_or_default(),
                 self.has_lrc_field => if track.has_lrc { "1" } else { "0" }.to_string(),
             );
+            for a in &track.artists {
+                doc.add_text(self.artists_field, a);
+            }
             writer.add_document(doc).map_err(|e| e.to_string())?;
         }
         drop(writer);
@@ -210,10 +219,11 @@ impl SearchIndex {
         // 使用 ngram tokenizer 进行查询解析
         let mut query_parser = QueryParser::for_index(
             &self.index,
-            vec![self.title_field, self.artist_field, self.album_field]
+            vec![self.title_field, self.artist_field, self.artists_field, self.album_field]
         );
         query_parser.set_field_boost(self.title_field, 2.0);
         query_parser.set_field_boost(self.artist_field, 1.5);
+        query_parser.set_field_boost(self.artists_field, 1.5);
 
         let query = query_parser.parse_query(query_str).map_err(|e| e.to_string())?;
 
@@ -268,8 +278,9 @@ impl SearchIndex {
             results.push(AudioTrack {
                 id,
                 path,
-                title,
-                artist,
+                title: title.clone(),
+                artist: artist.clone(),
+                artists: crate::split_artists(&artist),
                 album,
                 duration,
                 file_format,

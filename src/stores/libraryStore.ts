@@ -144,34 +144,13 @@ export const useLibraryStore = defineStore('library', () => {
 
   async function removeFolder(folderPath: string) {
     try {
+      // Backend handles cover cache cleanup, search index cleanup, and library.json update
       await invoke('remove_folder', { folderPath });
 
-      // 获取要删除的曲目，以便清理封面缓存
-      const tracksToRemove = libraryTracks.value.filter(t => t.path.startsWith(folderPath));
-
-      libraryFolders.value = libraryFolders.value.filter(f => f !== folderPath);
-      libraryTracks.value = libraryTracks.value.filter(t => !t.path.startsWith(folderPath));
-
-      // 删除对应曲目的封面缓存
-      for (const track of tracksToRemove) {
-        if (track.coverId) {
-          try {
-            await invoke('remove_cover', { coverId: track.coverId });
-          } catch (error) {
-            console.warn(`[LibraryStore] Failed to remove cover: ${track.coverId}`, error);
-          }
-        }
-      }
-
-      // 从搜索索引中移除
-      if (tracksToRemove.length > 0) {
-        try {
-          const trackIds = tracksToRemove.map(t => t.id);
-          await invoke('remove_tracks_from_index', { trackIds });
-        } catch (error) {
-          console.warn('[LibraryStore] Failed to remove tracks from index:', error);
-        }
-      }
+      // Update frontend state - normalize paths for comparison on Windows
+      const normalizedFolder = folderPath.replace(/\\/g, '/');
+      libraryFolders.value = libraryFolders.value.filter(f => f.replace(/\\/g, '/') !== normalizedFolder);
+      libraryTracks.value = libraryTracks.value.filter(t => !t.path.replace(/\\/g, '/').startsWith(normalizedFolder));
     } catch (error) {
       console.error('[LibraryStore] Failed to remove folder:', error);
     }

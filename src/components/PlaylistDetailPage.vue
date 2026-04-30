@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Play, Edit, Music, Heart, Trash2, ArrowUpDown, ArrowUp, ArrowDown, GripVertical } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
+import { formatTime } from '@/utils/format';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { useLibraryStore } from '@/stores/libraryStore';
@@ -163,13 +164,6 @@ const playlistCover = computed(() => {
 watch(() => playlist.value?.description, (newDesc) => {
   descriptionText.value = newDesc || '';
 }, { immediate: true });
-
-function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds)) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
 
 function startEditDescription() { isEditingDescription.value = true; }
 

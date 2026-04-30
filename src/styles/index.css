@@ -155,7 +155,7 @@
 
   /* 组件特定 */
   --btn-primary-bg: var(--color-primary);
-  --btn-primary-text: #f8f8f8;
+  --btn-primary-text: var(--text-on-primary);
   --btn-secondary-bg: rgba(255, 255, 255, 0.1);
   --btn-secondary-text: var(--text-primary);
   --btn-tertiary-bg: transparent;
@@ -245,7 +245,7 @@
   --dragged-overlay: var(--state-dragged-dark);
 
   --btn-primary-bg: var(--color-primary);
-  --btn-primary-text: #f8f8f8;
+  --btn-primary-text: var(--text-on-primary);
   --btn-secondary-bg: rgba(0, 0, 0, 0.08);
   --btn-secondary-text: var(--text-primary);
   --btn-tertiary-bg: transparent;

@@ -13,7 +13,8 @@ import {
 } from 'lucide-vue-next';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { getCoverUrl } from '@/utils/coverUrl'; // 引入封面工具
+import { getCoverUrl } from '@/utils/coverUrl';
+import { getFolderPath } from '@/utils/format';
 import type { AudioTrack } from '@/types';
 
 interface Props {
@@ -182,7 +183,7 @@ function onBlur() {
               </span>
             </div>
             <div class="result-right">
-              <span class="result-path-display">{{ track.path.split(/[/\\]/).slice(0, -1).join('/') }}</span>
+              <span class="result-path-display">{{ getFolderPath(track.path) }}</span>
               <span class="result-hint">下一首播放</span>
             </div>
           </div>

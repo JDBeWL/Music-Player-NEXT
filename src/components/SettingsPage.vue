@@ -8,6 +8,7 @@ import { useNeteaseStore } from '@/stores/neteaseStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { LyricsParser } from '@/utils/lyricsParser';
+import { getFolderName } from '@/utils/format';
 
 const configStore = useConfigStore();
 const neteaseStore = useNeteaseStore();
@@ -470,7 +471,7 @@ async function loadCacheInfo() {
 }
 
 async function clearAllCache() {
-  if (!confirm('确定要清理所有缓存吗？这将删除所有封面缓存和搜索索引。')) {
+  if (!confirm('确定要清理所有缓存吗？这将删除所有封面缓存和搜索索引。下次扫描时将重新生成。')) {
     return;
   }
 
@@ -478,8 +479,15 @@ async function clearAllCache() {
   try {
     await invoke('clear_cover_cache');
     await invoke('clear_search_index');
+
+    // Reset all track cover references since the cached files have been deleted
+    libraryStore.libraryTracks.forEach(track => {
+      track.coverUrl = undefined;
+      track.coverId = undefined;
+    });
+
     coverCacheCount.value = 0;
-    alert('缓存已清理完毕');
+    alert('缓存已清理完毕，下次扫描文件夹时将重新生成封面缓存。');
   } catch (error) {
     console.error('Failed to clear cache:', error);
     alert('清理失败: ' + error);
@@ -494,10 +502,6 @@ invoke<string>('get_library_path_info').then(path => {
   console.error('Failed to get library path:', error);
 });
 
-function getFolderName(folderPath: string): string {
-  const parts = folderPath.split(/[/\\]/);
-  return parts[parts.length - 1] || folderPath;
-}
 </script>
 
 <template>

@@ -1,7 +1,11 @@
 # Mercurial Player NEXT
 
 ![世界最後の音楽隊](/世界最後の音楽隊.png)
+---
+> 暗色模式
 
+![HELL！ or HELL？](/HELL！_or_HELL？.png)
+---
 > 「この空には色なんてないよ/This sky has no color」
 > 「涙には決まった形はないよ/Tears have no fixed shape」
 ——《世界最後の音楽隊 (feat. 初音ミク)》-夏山よつぎ/ど〜ぱみん/初音ミク

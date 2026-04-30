@@ -14,10 +14,10 @@ export interface ThemeColors {
 }
 
 const DEFAULT_THEME: ThemeColors = {
-  primary: '#91c4c7',
-  primaryDark: '#6aadb1',
+  primary: '#5BABAE',
+  primaryDark: '#005457',
   primaryLight: '#b8dbdd',
-  rgb: [145, 196, 199],
+  rgb: [91, 171, 174],
 };
 
 const currentTheme = ref<ThemeColors>({ ...DEFAULT_THEME });

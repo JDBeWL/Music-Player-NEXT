@@ -497,13 +497,13 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: #94a3b8;
+    color: var(--text-tertiary);
     font-size: 24px;
     gap: 16px;
 }
 
 .idle-state {
-    color: #94a3b8;
+    color: var(--text-tertiary);
     opacity: 0.6;
 }
 

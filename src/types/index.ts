@@ -5,6 +5,7 @@ export interface AudioTrack {
   path: string;
   title: string;
   artist: string;
+  artists: string[];
   album: string;
   duration: number;
   format: string;

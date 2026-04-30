@@ -19,6 +19,7 @@ import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { getCoverUrl } from '@/utils/coverUrl';
+import { formatTime, getFolderName, getFolderPath } from '@/utils/format';
 import { saveLibraryToBackend } from '@/services/persistence/libraryPersistence';
 import type { AudioTrack } from '@/types';
 
@@ -121,7 +122,11 @@ const folderList = computed(() => {
 const artistList = computed(() => {
   const artists = new Map<string, number>();
   for (const track of tracks.value) {
-    if (track.artist) {
+    if (track.artists && track.artists.length > 0) {
+      for (const a of track.artists) {
+        artists.set(a, (artists.get(a) || 0) + 1);
+      }
+    } else if (track.artist) {
       artists.set(track.artist, (artists.get(track.artist) || 0) + 1);
     }
   }
@@ -131,7 +136,7 @@ const artistList = computed(() => {
 const albumList = computed(() => {
   const albums = new Map<string, number>();
   for (const track of tracks.value) {
-    if (track.album) {
+    if (track.album && track.album !== 'Unknown Album') {
       albums.set(track.album, (albums.get(track.album) || 0) + 1);
     }
   }
@@ -157,7 +162,12 @@ const filteredTracks = computed(() => {
   }
 
   if (filterArtist.value) {
-    result = result.filter(t => t.artist === filterArtist.value);
+    result = result.filter(t => {
+      if (t.artists && t.artists.length > 0) {
+        return t.artists.includes(filterArtist.value);
+      }
+      return t.artist === filterArtist.value;
+    });
   }
 
   if (filterAlbum.value) {
@@ -201,13 +211,6 @@ const activeFilterCount = computed(() => {
   return count;
 });
 
-function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds)) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
 const hasSelection = computed(() => selectedIds.value.size > 0);
 
 function isTrackFavorite(trackPath: string): boolean {
@@ -232,11 +235,6 @@ function playAll() {
 
 function addTrackToQueue(track: AudioTrack) {
   playbackStore.addToQueue(track);
-}
-
-function getFolderName(folderPath: string): string {
-  const parts = folderPath.split(/[/\\]/);
-  return parts[parts.length - 1] || folderPath;
 }
 
 function clearSearch() {
@@ -477,12 +475,12 @@ function deselectAllFiles() {
               </div>
               <div class="text-[var(--text-tertiary)] text-xs flex items-center overflow-hidden gap-1 min-w-0">
                 <span v-if="track.format" class="track-format-tag shrink-0">{{ track.format.toUpperCase() }}</span>
-                <span class="truncate min-w-0 flex-shrink">{{ track.artist }}{{ track.album && track.album !== 'Unknown' ? ` · ${track.album}` : '' }}</span>
+                <span class="truncate min-w-0 flex-shrink">{{ track.artist }}{{ track.album && track.album !== 'Unknown Album' ? ` · ${track.album}` : '' }}</span>
               </div>
             </div>
 
             <div class="track-actions">
-              <span class="track-path-text group-hover:opacity-0">{{ track.path.split(/[/\\]/).slice(0, -1).join('/') }}</span>
+              <span class="track-path-text group-hover:opacity-0">{{ getFolderPath(track.path) }}</span>
               <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
               <div class="track-action-btns opacity-0 group-hover:opacity-100">
                 <button

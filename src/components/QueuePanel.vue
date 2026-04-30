@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { X, ListMusic, Music, Heart } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
+import { formatTime } from '@/utils/format';
 
 interface Track {
   id: string;
@@ -35,13 +36,6 @@ const isOpen = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val),
 });
-
-function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds)) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
 
 function closePanel() {
   isOpen.value = false;

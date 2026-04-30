@@ -587,7 +587,17 @@ pub fn extract_and_cache_covers_batch(audio_paths: Vec<String>) -> Result<Vec<(S
 #[tauri::command]
 pub fn get_cover_cache_info() -> Result<(String, usize), String> {
     if let Ok(ref cache) = get_cover_cache().read() {
-        let count = cache.index.len();
+        // Count actual files on disk to give accurate count,
+        // since in-memory index may be out of sync after restart with new UUIDs
+        let disk_count = fs::read_dir(&cache.dir)
+            .map(|entries| entries.filter_map(|e| e.ok()).filter(|e| e.path().is_file()).count())
+            .unwrap_or(0);
+        let count = if cache.index.is_empty() && disk_count > 0 {
+            // Index is empty but files exist on disk - show disk count
+            disk_count
+        } else {
+            cache.index.len()
+        };
         let dir = cache.get_dir().to_string_lossy().to_string();
         Ok((dir, count))
     } else {
@@ -611,6 +621,26 @@ pub fn remove_cover(cover_id: String) -> Result<(), String> {
     if let Ok(ref mut cache) = get_cover_cache().write() {
         cache.remove(&cover_id).map_err(|e| e.to_string())?;
         Ok(())
+    } else {
+        Err("Cache lock failed".to_string())
+    }
+}
+
+/// Remove covers from cache that are not referenced by any track.
+/// Returns the number of orphaned covers removed.
+#[tauri::command]
+pub fn cleanup_orphan_covers(referenced_cover_ids: Vec<String>) -> Result<usize, String> {
+    if let Ok(ref mut cache) = get_cover_cache().write() {
+        let referenced: std::collections::HashSet<String> = referenced_cover_ids.into_iter().collect();
+        let orphan_ids: Vec<String> = cache.index.keys()
+            .filter(|id| !referenced.contains(*id))
+            .cloned()
+            .collect();
+        let count = orphan_ids.len();
+        for id in orphan_ids {
+            let _ = cache.remove(&id);
+        }
+        Ok(count)
     } else {
         Err("Cache lock failed".to_string())
     }

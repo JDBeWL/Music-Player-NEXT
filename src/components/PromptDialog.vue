@@ -229,7 +229,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 .btn-confirm {
   background: var(--color-primary);
-  color: white;
+  color: var(--text-on-primary);
 }
 
 .btn-confirm:hover:not(:disabled) {
@@ -237,7 +237,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 .btn-confirm:disabled {
-  background: #91c4c7;
+  background: var(--color-primary-light);
   cursor: not-allowed;
 }
 </style>

@@ -195,7 +195,7 @@ function handleCancel() {
 }
 
 .btn-confirm {
-  color: white;
+  color: var(--text-on-primary);
 }
 
 .btn-confirm.warning {

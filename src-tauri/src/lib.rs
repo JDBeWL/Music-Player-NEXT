@@ -56,6 +56,8 @@ pub struct AudioTrack {
     pub path: String,
     pub title: String,
     pub artist: String,
+    #[serde(rename = "artists")]
+    pub artists: Vec<String>,
     pub album: String,
     pub duration: f64,
     #[serde(rename = "format")]
@@ -70,6 +72,14 @@ pub struct AudioTrack {
     pub lrc: Option<String>,
     #[serde(rename = "hasLrc")]
     pub has_lrc: bool,
+}
+
+fn split_artists(artist: &str) -> Vec<String> {
+    let re = regex::Regex::new(r"(?:\s*[;&/,]\s*|\s+feat\.?\s*|\s+ft\.?\s*|\s+vs\.?\s*)").unwrap();
+    re.split(artist)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -462,12 +472,19 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
     let folder_path_clone = folder_path.clone();
     tokio::task::spawn_blocking(move || {
         let lib = get_library_sync().map_err(|e| e.to_string())?;
+        // Normalize path separators for comparison (Windows uses both / and \)
+        let normalized_folder = folder_path_clone.replace('\\', "/");
+        let matches_folder = |track_path: &str| -> bool {
+            let normalized_track = track_path.replace('\\', "/");
+            normalized_track.starts_with(&normalized_folder)
+        };
+
         let track_ids: Vec<String> = lib.tracks.iter()
-            .filter(|t| t.path.starts_with(&folder_path_clone))
+            .filter(|t| matches_folder(&t.path))
             .map(|t| t.id.clone())
             .collect();
         let ids: Vec<String> = lib.tracks.iter()
-            .filter(|t| t.path.starts_with(&folder_path_clone))
+            .filter(|t| matches_folder(&t.path))
             .filter_map(|t| t.cover_id.clone())
             .collect();
 
@@ -488,8 +505,8 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
         }
 
         let mut lib = lib;
-        lib.folders.retain(|f| f != &folder_path_clone);
-        lib.tracks.retain(|t| !t.path.starts_with(&folder_path_clone));
+        lib.folders.retain(|f| normalize_path(f) != normalized_folder);
+        lib.tracks.retain(|t| !matches_folder(&t.path));
         save_library_sync(&lib)?;
 
         Ok::<(), String>(())
@@ -499,6 +516,10 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
     .map_err(|e| e)?;
 
     Ok(())
+}
+
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 fn save_library_sync(library: &MusicLibrary) -> Result<(), String> {
@@ -684,8 +705,9 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
     Ok(AudioTrack {
         id: track_id_from_path(&path),
         path: path.to_string(),
-        title,
-        artist,
+        title: title.clone(),
+        artist: artist.clone(),
+        artists: split_artists(&artist),
         album,
         duration,
         file_format,
@@ -928,6 +950,7 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| "Unknown".to_string()),
                         artist: "Unknown Artist".to_string(),
+                        artists: vec!["Unknown Artist".to_string()],
                         album: "Unknown Album".to_string(),
                         duration: 0.0,
                         file_format: file_path.extension()
@@ -1148,6 +1171,7 @@ pub fn run() {
             cover_cache::get_cover_cache_info,
             cover_cache::clear_cover_cache,
             cover_cache::remove_cover,
+            cover_cache::cleanup_orphan_covers,
             clear_search_index,
             rebuild_search_index,
             get_settings,
@@ -1227,6 +1251,9 @@ pub fn run() {
                         if !first_close_hint_shown {
                             api.prevent_close();
                             if let Some(w) = app_handle.get_webview_window("main") {
+                                let _ = w.unminimize();
+                                let _ = w.show();
+                                let _ = w.set_focus();
                                 let _ = w.emit("show-close-hint-dialog", ());
                             }
                         } else if close_behavior == "quit" {
@@ -1243,6 +1270,7 @@ pub fn run() {
             tray_handle.on_tray_icon_event(move |_tray, event| {
                 if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } = event {
                     if let Some(window) = app_handle_for_tray.get_webview_window("main") {
+                        let _ = window.unminimize();
                         let _ = window.show();
                         let _ = window.set_focus();
                         let _ = window.set_always_on_top(true);
@@ -1254,6 +1282,7 @@ pub fn run() {
                 match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
                             let _ = window.show();
                             let _ = window.set_focus();
                         }

@@ -23,6 +23,7 @@ import {
   Check,
 } from 'lucide-vue-next';
 import { QUALITY_OPTIONS } from '@/services/netease/api';
+import { formatDurationMs } from '@/utils/format';
 
 const neteaseStore = useNeteaseStore();
 const playbackStore = usePlaybackStore();
@@ -97,13 +98,6 @@ async function playSong(song: any) {
   } finally {
     loadingId.value = null;
   }
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function toggleLoginPanel() {
@@ -384,7 +378,7 @@ function getSongDuration(song: any): number {
           </div>
           <div class="result-duration">
             <Clock :size="12" />
-            <span>{{ formatDuration(getSongDuration(song)) }}</span>
+            <span>{{ formatDurationMs(getSongDuration(song)) }}</span>
           </div>
           <button
             class="result-download-btn"

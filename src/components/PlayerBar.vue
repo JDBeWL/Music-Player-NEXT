@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from 'vue';
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'radix-vue';
+import { formatTime } from '@/utils/format';
 import {
   Play,
   Pause,
@@ -72,13 +73,6 @@ const RepeatIcon = computed(() => {
 
 const trackTitle = computed(() => props.currentTrack?.title || '未选择歌曲');
 const artistName = computed(() => props.currentTrack?.artist || '未知艺术家');
-
-function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds)) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
 
 function handleVolumeChange(value: number[] | undefined) {
   if (value && value.length > 0) {

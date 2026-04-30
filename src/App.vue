@@ -187,6 +187,10 @@ async function handleCloseHintCancel(remember: boolean) {
   await invoke('hide_window').catch(console.error);
 }
 
+function handleCloseHintDismiss() {
+  showCloseHintDialog.value = false;
+}
+
 watch(() => playbackStore.currentCoverUrl, (coverUrl) => {
   if (coverUrl) {
     updateThemeFromCover(coverUrl);
@@ -345,7 +349,7 @@ async function _confirmDeletePlaylist() {
       <div
         v-if="showCloseHintDialog"
         class="close-hint-overlay"
-        @click.self="handleCloseHintCancel(false)"
+        @click.self="handleCloseHintDismiss"
         role="presentation"
       >
         <div
@@ -356,7 +360,7 @@ async function _confirmDeletePlaylist() {
         >
           <div class="close-hint-header">
             <h3 id="close-hint-title" class="close-hint-title">选择关闭行为</h3>
-            <button class="close-hint-close" @click="handleCloseHintCancel(false)" aria-label="关闭对话框">
+            <button class="close-hint-close" @click="handleCloseHintDismiss" aria-label="关闭对话框">
               <X :size="18" />
             </button>
           </div>
@@ -575,7 +579,7 @@ async function _confirmDeletePlaylist() {
 }
 
 .btn-confirm {
-  color: white;
+  color: var(--text-on-primary);
 }
 
 .btn-confirm.warning {
