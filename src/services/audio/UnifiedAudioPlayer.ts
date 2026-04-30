@@ -1,6 +1,7 @@
 import { NativeAudioPlayer } from './NativeAudioPlayer';
 import { FFmpegAudioService } from './FFmpegService';
 import type { AudioTrack, PlaybackState } from '@/types';
+import { needsFFmpegConversion } from '@/types';
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type ProgressCallback = (currentTime: number, duration: number) => void;
@@ -24,31 +25,18 @@ class UnifiedAudioPlayer {
   }
 
   /**
-   * 判断格式是否需要 FFmpeg 转码
-   */
-  private needsFFmpegConversion(extension: string): boolean {
-    const needsConversion = ['ape', 'wma', 'tak', 'tta'];
-    return needsConversion.includes(extension.toLowerCase());
-  }
-
-  /**
    * 加载并播放音频
    * @param track 音轨信息
    * @param fileUrl 文件 URL（用于原生播放）
    * @param audioData 音频数据（用于 FFmpeg 转码）
    */
   async loadAndPlay(track: AudioTrack, fileUrl: string, audioData?: Uint8Array): Promise<void> {
-    const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
-    
-    console.log('[UnifiedPlayer] Loading:', track.title, 'format:', extension);
+    const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
 
-    // 停止当前播放
     this.stop();
     this.currentTrack = track;
 
-    if (this.needsFFmpegConversion(extension)) {
-      // 使用 FFmpeg 转码播放
-      console.log('[UnifiedPlayer] Using FFmpeg for:', extension);
+    if (needsFFmpegConversion(extension)) {
       this.currentPlayer = 'ffmpeg';
       
       if (!audioData) {
@@ -57,26 +45,18 @@ class UnifiedAudioPlayer {
       
       await this.ffmpegPlayer.loadAndPlay(track, audioData);
     } else {
-      // 使用原生播放器流式播放
-      console.log('[UnifiedPlayer] Using native player for:', extension);
       this.currentPlayer = 'native';
       await this.nativePlayer.loadAndPlay(track, fileUrl);
     }
   }
 
-  /**
-   * 仅加载音频，不自动播放（用于恢复播放状态）
-   */
   async load(track: AudioTrack, fileUrl: string, audioData?: Uint8Array): Promise<void> {
-    const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
-
-    console.log('[UnifiedPlayer] Loading (no play):', track.title, 'format:', extension);
+    const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
 
     this.stop();
     this.currentTrack = track;
 
-    if (this.needsFFmpegConversion(extension)) {
-      console.log('[UnifiedPlayer] Using FFmpeg for:', extension);
+    if (needsFFmpegConversion(extension)) {
       this.currentPlayer = 'ffmpeg';
 
       if (!audioData) {
@@ -85,24 +65,16 @@ class UnifiedAudioPlayer {
 
       await this.ffmpegPlayer.load(track, audioData);
     } else {
-      console.log('[UnifiedPlayer] Using native player for:', extension);
       this.currentPlayer = 'native';
       await this.nativePlayer.load(track, fileUrl);
     }
   }
 
-  /**
-   * 预加载下一首（仅用于 FFmpeg 转码格式）
-   */
   async preload(track: AudioTrack, audioData: Uint8Array): Promise<void> {
-    const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
+    const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
     
-    if (this.needsFFmpegConversion(extension)) {
-      console.log('[UnifiedPlayer] Preloading with FFmpeg:', track.title);
+    if (needsFFmpegConversion(extension)) {
       await this.ffmpegPlayer.preloadTrack(track, audioData);
-    } else {
-      // 原生格式不需要预加载，流式播放很快
-      console.log('[UnifiedPlayer] Skip preload for native format:', extension);
     }
   }
 

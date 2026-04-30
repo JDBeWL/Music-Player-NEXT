@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type { AudioTrack, PlaybackState, RepeatMode } from '@/types';
+import { needsFFmpegConversion } from '@/types';
 import { unifiedAudioPlayer } from '@/services/audio/UnifiedAudioPlayer';
 
 export const usePlaybackStore = defineStore('playback', () => {
@@ -94,8 +95,6 @@ export const usePlaybackStore = defineStore('playback', () => {
     playbackState.value = 'loading';
 
     try {
-      console.log('[PlaybackStore] Loading track:', track.title, track.path);
-
       const isOnlineUrl = track.path.startsWith('http://') || track.path.startsWith('https://');
 
       let fileUrl: string;
@@ -103,28 +102,20 @@ export const usePlaybackStore = defineStore('playback', () => {
 
       if (isOnlineUrl) {
         fileUrl = track.path;
-        console.log('[PlaybackStore] Online URL:', fileUrl);
       } else {
         fileUrl = convertFileSrc(track.path);
-        console.log('[PlaybackStore] File URL:', fileUrl);
 
-        const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
-        const needsFFmpeg = ['ape', 'wma', 'tak', 'tta'].includes(extension);
+        const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
+        const needsFFmpeg = needsFFmpegConversion(extension);
 
         if (needsFFmpeg) {
-          console.log('[PlaybackStore] Reading file for FFmpeg transcoding');
           const response = await fetch(fileUrl);
           if (!response.ok) {
             throw new Error(`Failed to fetch file: ${response.statusText}`);
           }
           const arrayBuffer = await response.arrayBuffer();
-          console.log('[PlaybackStore] Read', arrayBuffer.byteLength, 'bytes from file');
           audioData = new Uint8Array(arrayBuffer);
         }
-      }
-
-      if (track.coverUrl) {
-        console.log('[PlaybackStore] Track already has coverUrl:', track.coverUrl);
       }
 
       if (autoPlay) {
@@ -134,8 +125,6 @@ export const usePlaybackStore = defineStore('playback', () => {
       }
 
       currentTrack.value = { ...track };
-
-      console.log('[PlaybackStore] Track loaded successfully, coverUrl:', currentTrack.value.coverUrl, 'hasLyrics:', !!currentTrack.value.lrc);
 
       savePlaybackState(currentPlaylistId.value);
 
@@ -158,10 +147,8 @@ export const usePlaybackStore = defineStore('playback', () => {
     if (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://')) return;
 
     try {
-      console.log('[PlaybackStore] Preloading next track:', nextTrack.title);
-
-      const extension = nextTrack.path.split('.').pop()?.toLowerCase() || 'mp3';
-      const needsFFmpeg = ['ape', 'wma', 'tak', 'tta'].includes(extension);
+      const extension = nextTrack.format || nextTrack.path.split('.').pop()?.toLowerCase() || 'mp3';
+      const needsFFmpeg = needsFFmpegConversion(extension);
 
       if (needsFFmpeg) {
         const fileUrl = convertFileSrc(nextTrack.path);
@@ -172,8 +159,6 @@ export const usePlaybackStore = defineStore('playback', () => {
         const arrayBuffer = await response.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
         await unifiedAudioPlayer.preload(nextTrack, uint8Array);
-      } else {
-        console.log('[PlaybackStore] Skip preload for native format:', extension);
       }
     } catch (error) {
       console.warn('[PlaybackStore] Failed to preload next track:', error);
@@ -255,7 +240,6 @@ export const usePlaybackStore = defineStore('playback', () => {
     }
 
     const state = unifiedAudioPlayer.getState();
-    console.log('[PlaybackStore] Toggle play, current state:', state);
 
     if (state === 'playing') {
       unifiedAudioPlayer.pause();

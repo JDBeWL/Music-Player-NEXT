@@ -1,4 +1,5 @@
 import type { AudioTrack, PlaybackState } from '@/types';
+import { needsFFmpegConversion } from '@/types';
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type ProgressCallback = (currentTime: number, duration: number) => void;
@@ -46,9 +47,6 @@ class FFmpegAudioService {
     this.isInitializing = true;
 
     try {
-      console.log('[FFmpeg] Initializing worker...');
-
-      // 创建 Web Worker
       this.worker = new Worker(new URL('../../workers/ffmpeg.worker.ts', import.meta.url), {
         type: 'module'
       });
@@ -88,7 +86,6 @@ class FFmpegAudioService {
       this.gainNode.connect(this.audioContext.destination);
 
       this.isInitialized = true;
-      console.log('[FFmpeg] Initialized successfully');
     } finally {
       this.isInitializing = false;
     }
@@ -185,7 +182,6 @@ class FFmpegAudioService {
       }
 
       if (oldestKey) {
-        console.log('[FFmpeg] Evicting cache for:', oldestKey);
         this.audioCache.delete(oldestKey);
       }
     }
@@ -219,10 +215,7 @@ class FFmpegAudioService {
       const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
       let arrayBuffer: ArrayBuffer;
 
-      console.log('[FFmpeg] Preloading:', track.title);
-
-      // 判断是否需要 FFmpeg 转码
-      if (this.needsFFmpegConversion(extension)) {
+      if (needsFFmpegConversion(extension)) {
         const convertedData = await this.convertAudioInWorker(audioData, extension, `preload_${track.id}`);
         arrayBuffer = convertedData.buffer as ArrayBuffer;
       } else {
@@ -235,22 +228,12 @@ class FFmpegAudioService {
       const buffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
       this.cacheAudio(track.id, buffer);
-
-      console.log('[FFmpeg] Preloaded:', track.title);
     } catch (error) {
       console.warn('[FFmpeg] Preload failed for:', track.title, error);
     }
   }
 
-  private needsFFmpegConversion(extension: string): boolean {
-    // 只有这些格式需要 FFmpeg 转码
-    const needsConversion = ['ape', 'wma', 'tak', 'tta'];
-    return needsConversion.includes(extension);
-  }
-
   async load(track: AudioTrack, audioData: Uint8Array): Promise<void> {
-    console.log('[FFmpeg] Loading track (no play):', track.title);
-
     this.stop();
     this.setState('loading');
     this.currentTrack = track;
@@ -258,10 +241,8 @@ class FFmpegAudioService {
     try {
       const cachedBuffer = this.getCachedAudio(track.id);
       if (cachedBuffer) {
-        console.log('[FFmpeg] Using cached audio for:', track.title);
         this.audioBuffer = cachedBuffer;
         this.pauseTime = 0;
-        // 触发 progress 回调
         this.progressListeners.forEach(cb => cb(0, cachedBuffer.duration));
         this.setState('paused');
         return;
@@ -272,12 +253,10 @@ class FFmpegAudioService {
       const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
       let arrayBuffer: ArrayBuffer;
 
-      if (this.needsFFmpegConversion(extension)) {
-        console.log('[FFmpeg] Converting in worker:', extension);
+      if (needsFFmpegConversion(extension)) {
         const convertedData = await this.convertAudioInWorker(audioData, extension, track.id);
         arrayBuffer = convertedData.buffer as ArrayBuffer;
       } else {
-        console.log('[FFmpeg] Native decoding:', extension);
         arrayBuffer = audioData.buffer as ArrayBuffer;
       }
 
@@ -290,11 +269,9 @@ class FFmpegAudioService {
       this.audioBuffer = buffer;
       this.pauseTime = 0;
 
-      // 触发 progress 回调
       this.progressListeners.forEach(cb => cb(0, buffer.duration));
 
       this.setState('paused');
-      console.log('[FFmpeg] Track loaded, ready to play, duration:', buffer.duration);
     } catch (error) {
       console.error('[FFmpeg] Failed to load audio:', error);
       this.setState('error');
@@ -303,8 +280,6 @@ class FFmpegAudioService {
   }
 
   async loadAndPlay(track: AudioTrack, audioData: Uint8Array): Promise<void> {
-    console.log('[FFmpeg] Loading track:', track.title);
-
     this.stop();
     this.setState('loading');
     this.currentTrack = track;
@@ -312,7 +287,6 @@ class FFmpegAudioService {
     try {
       const cachedBuffer = this.getCachedAudio(track.id);
       if (cachedBuffer) {
-        console.log('[FFmpeg] Using cached audio for:', track.title);
         this.audioBuffer = cachedBuffer;
         this.pauseTime = 0;
         this.play();
@@ -324,30 +298,22 @@ class FFmpegAudioService {
       const extension = track.path.split('.').pop()?.toLowerCase() || 'mp3';
       let arrayBuffer: ArrayBuffer;
 
-      // 判断是否需要 FFmpeg 转码
-      if (this.needsFFmpegConversion(extension)) {
-        console.log('[FFmpeg] Converting in worker:', extension);
+      if (needsFFmpegConversion(extension)) {
         const convertedData = await this.convertAudioInWorker(audioData, extension, track.id);
         arrayBuffer = convertedData.buffer as ArrayBuffer;
       } else {
-        console.log('[FFmpeg] Native decoding:', extension);
         arrayBuffer = audioData.buffer as ArrayBuffer;
       }
-
-      console.log('[FFmpeg] Decoding audio data...');
 
       if (!this.audioContext) {
         throw new Error('AudioContext not initialized');
       }
       const buffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-      console.log('[FFmpeg] Audio decoded successfully, duration:', buffer.duration);
-
       this.cacheAudio(track.id, buffer);
       this.audioBuffer = buffer;
       this.pauseTime = 0;
 
-      console.log('[FFmpeg] Starting playback...');
       this.play();
 
     } catch (error) {
@@ -358,18 +324,12 @@ class FFmpegAudioService {
   }
 
   play(): void {
-    console.log('[FFmpeg] play() called, state:', this.state);
-    console.log('[FFmpeg] audioContext:', !!this.audioContext);
-    console.log('[FFmpeg] audioBuffer:', !!this.audioBuffer);
-    console.log('[FFmpeg] gainNode:', !!this.gainNode);
-
     if (!this.audioContext || !this.audioBuffer || !this.gainNode) {
       console.error('[FFmpeg] Cannot play: missing audio context, buffer or gain node');
       return;
     }
 
     if (this.audioContext.state === 'suspended') {
-      console.log('[FFmpeg] Resuming audio context...');
       this.audioContext.resume();
     }
 
@@ -379,7 +339,6 @@ class FFmpegAudioService {
 
     this.sourceNode.onended = () => {
       if (this.state === 'playing') {
-        console.log('[FFmpeg] Track ended');
         this.pauseTime = 0;
         this.trackEndListeners.forEach(cb => cb());
       }
@@ -388,7 +347,6 @@ class FFmpegAudioService {
     this.startTime = this.audioContext.currentTime;
     this.sourceNode.start(0, this.pauseTime);
     this.setState('playing');
-    console.log('[FFmpeg] Playing started');
 
     this.startProgressTracking();
   }
@@ -403,7 +361,6 @@ class FFmpegAudioService {
     this.sourceNode = null;
     this.setState('paused');
     this.stopProgressTracking();
-    console.log('[FFmpeg] Paused at', this.pauseTime);
   }
 
   stop(): void {
@@ -430,7 +387,6 @@ class FFmpegAudioService {
     }
 
     this.pauseTime = Math.max(0, Math.min(time, this.getDuration()));
-    console.log('[FFmpeg] Seek to', this.pauseTime);
 
     if (wasPlaying) {
       this.play();
@@ -465,7 +421,6 @@ class FFmpegAudioService {
 
   clearCache(): void {
     this.audioCache.clear();
-    console.log('[FFmpeg] Cache cleared');
   }
 
   getCacheSize(): number {

@@ -20,6 +20,8 @@ use search_index::SearchIndex;
 
 mod netease;
 
+const SUPPORTED_AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "flac", "ogg", "m4a", "aac", "ape", "wma"];
+
 static SEARCH_INDEX: OnceLock<Arc<RwLock<Option<SearchIndex>>>> = OnceLock::new();
 
 fn get_search_index() -> &'static Arc<RwLock<Option<SearchIndex>>> {
@@ -56,6 +58,8 @@ pub struct AudioTrack {
     pub artist: String,
     pub album: String,
     pub duration: f64,
+    #[serde(rename = "format")]
+    pub file_format: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "coverUrl")]
     pub cover_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "coverId")]
@@ -88,7 +92,7 @@ pub struct MusicLibrary {
 
 fn default_scan_depth() -> u32 { 3 }
 
-fn get_data_dir() -> PathBuf {
+pub(crate) fn get_data_dir() -> PathBuf {
     let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("MercurialPlayerNEXT")
 }
@@ -109,7 +113,7 @@ fn get_library_path() -> PathBuf {
     get_data_dir().join("library.json")
 }
 
-fn get_settings_path() -> PathBuf {
+pub(crate) fn get_settings_path() -> PathBuf {
     get_data_dir().join("settings.json")
 }
 
@@ -143,6 +147,8 @@ pub struct AppSettings {
     pub persist_playback: bool,
     #[serde(default = "default_netease_real_ip")]
     pub netease_real_ip: String,
+    #[serde(default = "default_netease_api_base_url")]
+    pub netease_api_base_url: String,
 }
 
 impl Default for AppSettings {
@@ -162,6 +168,7 @@ impl Default for AppSettings {
             first_close_hint_shown: false,
             persist_playback: default_persist_playback(),
             netease_real_ip: default_netease_real_ip(),
+            netease_api_base_url: default_netease_api_base_url(),
         }
     }
 }
@@ -173,6 +180,7 @@ fn default_theme_mode() -> String { "dark".to_string() }
 fn default_close_behavior() -> String { "to_tray".to_string() }
 fn default_persist_playback() -> bool { true }
 fn default_netease_real_ip() -> String { "116.25.146.177".to_string() }
+fn default_netease_api_base_url() -> String { "https://netease-cloud-music-api-two-sandy.vercel.app".to_string() }
 
 #[tauri::command]
 async fn get_settings() -> Result<AppSettings, String> {
@@ -231,6 +239,7 @@ pub struct PartialSettings {
     pub first_close_hint_shown: Option<bool>,
     pub persist_playback: Option<bool>,
     pub netease_real_ip: Option<String>,
+    pub netease_api_base_url: Option<String>,
 }
 
 #[tauri::command]
@@ -260,6 +269,7 @@ async fn update_settings(partial: PartialSettings) -> Result<(), String> {
         if let Some(v) = partial.first_close_hint_shown { settings.first_close_hint_shown = v; }
         if let Some(v) = partial.persist_playback { settings.persist_playback = v; }
         if let Some(v) = partial.netease_real_ip { settings.netease_real_ip = v; }
+        if let Some(v) = partial.netease_api_base_url { settings.netease_api_base_url = v; }
 
         let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
         fs::write(&path, content).map_err(|e| e.to_string())
@@ -268,12 +278,22 @@ async fn update_settings(partial: PartialSettings) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-fn init_search_index() -> Result<(), String> {
+fn ensure_search_index() -> Result<(), String> {
+    {
+        let guard = get_search_index().read().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            return Ok(());
+        }
+    }
+
+    let mut guard = get_search_index().write().map_err(|e| e.to_string())?;
+    if guard.is_some() {
+        return Ok(());
+    }
+
     let index_path = get_index_dir();
     let search_index = SearchIndex::new(index_path)?;
-
-    let mut global_index = get_search_index().write().map_err(|e| e.to_string())?;
-    *global_index = Some(search_index);
+    *guard = Some(search_index);
     Ok(())
 }
 
@@ -304,7 +324,8 @@ async fn save_library(library: MusicLibrary) -> Result<(), String> {
         Ok::<(), String>(())
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| e)?;
 
     Ok(())
 }
@@ -313,14 +334,7 @@ async fn save_library(library: MusicLibrary) -> Result<(), String> {
 async fn rebuild_search_index() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let library = get_library_sync()?;
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-
-        if needs_init {
-            init_search_index()?;
-        }
+        ensure_search_index()?;
 
         let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
@@ -337,14 +351,7 @@ async fn rebuild_search_index() -> Result<(), String> {
 #[tauri::command]
 async fn add_tracks_to_index(tracks: Vec<AudioTrack>) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-
-        if needs_init {
-            init_search_index()?;
-        }
+        ensure_search_index()?;
 
         let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
@@ -360,14 +367,7 @@ async fn add_tracks_to_index(tracks: Vec<AudioTrack>) -> Result<(), String> {
 #[tauri::command]
 async fn add_track_to_index(track: AudioTrack) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-
-        if needs_init {
-            init_search_index()?;
-        }
+        ensure_search_index()?;
 
         let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
@@ -397,14 +397,7 @@ async fn remove_track_from_index(track_id: String) -> Result<(), String> {
 #[tauri::command]
 async fn remove_tracks_from_index(track_ids: Vec<String>) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-
-        if needs_init {
-            init_search_index()?;
-        }
+        ensure_search_index()?;
 
         let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
@@ -419,14 +412,7 @@ async fn remove_tracks_from_index(track_ids: Vec<String>) -> Result<(), String> 
 #[tauri::command]
 async fn clear_search_index() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-
-        if needs_init {
-            init_search_index()?;
-        }
+        ensure_search_index()?;
 
         let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
@@ -441,14 +427,7 @@ async fn clear_search_index() -> Result<(), String> {
 #[tauri::command]
 async fn search_tracks(query: String, limit: Option<usize>) -> Result<Vec<AudioTrack>, String> {
     tokio::task::spawn_blocking(move || {
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-
-        if needs_init {
-            init_search_index()?;
-        }
+        ensure_search_index()?;
 
         let global_index = get_search_index().read().map_err(|e| e.to_string())?;
         if let Some(index) = global_index.as_ref() {
@@ -492,13 +471,7 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
             .filter_map(|t| t.cover_id.clone())
             .collect();
 
-        let needs_init = {
-            let guard = get_search_index().read().map_err(|e| e.to_string())?;
-            guard.is_none()
-        };
-        if needs_init {
-            init_search_index().map_err(|e| e.to_string())?;
-        }
+        ensure_search_index().map_err(|e| e.to_string())?;
 
         {
             let global_index = get_search_index().read().map_err(|e| e.to_string())?;
@@ -522,7 +495,8 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
         Ok::<(), String>(())
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| e)?;
 
     Ok(())
 }
@@ -537,30 +511,24 @@ fn save_library_sync(library: &MusicLibrary) -> Result<(), String> {
 
 #[tauri::command]
 async fn save_playlists(playlists: Vec<Playlist>) -> Result<(), String> {
-    let library = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let mut lib = get_library_sync().unwrap_or_default();
         lib.playlists = playlists;
-        lib
+        save_library_sync(&lib)
     })
     .await
-    .map_err(|e| e.to_string())?;
-
-    save_library(library).await?;
-    Ok(())
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
 async fn save_tracks(tracks: Vec<AudioTrack>) -> Result<(), String> {
-    let library = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let mut lib = get_library_sync().unwrap_or_default();
         lib.tracks = tracks;
-        lib
+        save_library_sync(&lib)
     })
     .await
-    .map_err(|e| e.to_string())?;
-
-    save_library(library).await?;
-    Ok(())
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -670,17 +638,14 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
                     let data = picture.data();
                     let hash = cover_cache::compute_cover_hash(data);
 
-                    if let Ok(ref cache) = get_cover_cache().read() {
+                    if let Ok(ref mut cache) = get_cover_cache().write() {
                         if let Some((existing_id, entry)) = cache.find_by_hash(hash) {
+                            let _ = cache.get(&existing_id);
                             cover_url = Some(entry.cover_path);
                             cover_id_val = Some(existing_id);
-                        }
-                    }
-
-                    if cover_url.is_none() {
-                        let cid = format!("cover_{}", uuid_simple());
-                        if let Ok(ref mut c) = get_cover_cache().write() {
-                            if let Ok(entry) = c.put(cid.clone(), data) {
+                        } else {
+                            let cid = format!("cover_{}", uuid_simple());
+                            if let Ok(entry) = cache.put(cid.clone(), data) {
                                 cover_url = Some(entry.cover_path);
                                 cover_id_val = Some(cid);
                             }
@@ -711,13 +676,19 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
     let ass_path = path_obj.with_extension("ass");
     let has_lrc = lrc_path.exists() || ass_path.exists();
 
+    let file_format = std::path::Path::new(&path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
     Ok(AudioTrack {
-        id: format!("track_{}", uuid_simple()),
+        id: track_id_from_path(&path),
         path: path.to_string(),
         title,
         artist,
         album,
         duration,
+        file_format,
         cover_url,
         cover_id: cover_id_val,
         file_mtime,
@@ -727,19 +698,24 @@ fn parse_audio_metadata_sync(path: &str) -> Result<AudioTrack, String> {
 }
 
 fn uuid_simple() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let rand_part = (nanos.wrapping_mul(6364136223846793005) ^ 1442695040888963407) as u64;
-    format!("{:x}{:08x}", nanos, (rand_part & 0xFFFFFFFF) as u32)
+    cover_cache::uuid_simple()
+}
+
+fn track_id_from_path(path: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let canonical = std::path::Path::new(path)
+        .canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    canonical.to_lowercase().hash(&mut hasher);
+    format!("track_{:016x}", hasher.finish())
 }
 
 #[tauri::command]
 async fn scan_folder(folder_path: String) -> Result<Vec<AudioTrack>, String> {
     let folder_path = folder_path;
-    let supported_extensions = ["mp3", "wav", "flac", "ogg", "m4a", "aac", "ape", "wma"];
 
     let result = task::spawn_blocking(move || {
         let mut tracks = Vec::new();
@@ -752,7 +728,7 @@ async fn scan_folder(folder_path: String) -> Result<Vec<AudioTrack>, String> {
             if path.is_file() {
                 if let Some(ext) = path.extension() {
                     let ext_str = ext.to_string_lossy().to_lowercase();
-                    if supported_extensions.contains(&ext_str.as_str()) {
+                    if SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_str.as_str()) {
                         if let Ok(track) = parse_audio_metadata_sync(&path.to_string_lossy()) {
                             tracks.push(track);
                         }
@@ -765,7 +741,8 @@ async fn scan_folder(folder_path: String) -> Result<Vec<AudioTrack>, String> {
         Ok::<Vec<AudioTrack>, String>(tracks)
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))??;
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| e)?;
 
     Ok(result)
 }
@@ -811,8 +788,7 @@ async fn get_files_with_mtime(app: AppHandle, folder_path: String, max_depth: u3
                 } else if entry_path.is_file() {
                     if let Some(ext) = entry_path.extension() {
                         let ext_str = ext.to_string_lossy().to_lowercase();
-                        let supported = ["mp3", "wav", "flac", "ogg", "m4a", "aac", "ape", "wma"];
-                        if supported.contains(&ext_str.as_str()) {
+                        if SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_str.as_str()) {
                             let mtime = entry.metadata()
                                 .ok()
                                 .and_then(|m| m.modified().ok())
@@ -852,7 +828,6 @@ async fn get_files_with_mtime(app: AppHandle, folder_path: String, max_depth: u3
 #[tauri::command]
 async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u32) -> Result<Vec<AudioTrack>, String> {
     let folder_path = folder_path.clone();
-    let supported_extensions = ["mp3", "wav", "flac", "ogg", "m4a", "aac", "ape", "wma"];
 
     let _ = app.emit("scan-progress", ScanProgress {
         current: 0,
@@ -868,7 +843,6 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
             path: &PathBuf,
             current_depth: u32,
             max_depth: u32,
-            supported_extensions: &[&str],
             files: &mut Vec<PathBuf>,
         ) -> Result<(), String> {
             if current_depth > max_depth {
@@ -882,11 +856,11 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
                 let entry_path = entry.path();
 
                 if entry_path.is_dir() {
-                    collect_files(&entry_path, current_depth + 1, max_depth, supported_extensions, files)?;
+                    collect_files(&entry_path, current_depth + 1, max_depth, files)?;
                 } else if entry_path.is_file() {
                     if let Some(ext) = entry_path.extension() {
                         let ext_str = ext.to_string_lossy().to_lowercase();
-                        if supported_extensions.contains(&ext_str.as_str()) {
+                        if SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_str.as_str()) {
                             files.push(entry_path);
                         }
                     }
@@ -897,7 +871,7 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
         }
 
         let root_path = PathBuf::from(&folder_path);
-        let _ = collect_files(&root_path, 0, max_depth, &supported_extensions, &mut files);
+        let _ = collect_files(&root_path, 0, max_depth, &mut files);
         files
     })
     .await
@@ -916,23 +890,30 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
     }
 
     let processed = Arc::new(AtomicUsize::new(0));
-    let processed_clone = processed.clone();
+    let processed_for_progress = processed.clone();
+    let processed_for_iter = processed.clone();
+    let app_for_progress = app.clone();
+
+    let progress_handle = std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let current = processed_for_progress.load(Ordering::Relaxed);
+            let _ = app_for_progress.emit("scan-progress", ScanProgress {
+                current,
+                total: total_files,
+                current_file: format!("{}/{}", current, total_files),
+                phase: "scanning".to_string(),
+            });
+            if current >= total_files {
+                break;
+            }
+        }
+    });
 
     let tracks: Vec<AudioTrack> = all_files
         .par_iter()
         .map(|file_path| {
-            let current = processed_clone.fetch_add(1, Ordering::Relaxed) + 1;
-
-            if current % 10 == 0 || current == total_files {
-                let _ = app.emit("scan-progress", ScanProgress {
-                    current: current,
-                    total: total_files,
-                    current_file: file_path.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                    phase: "scanning".to_string(),
-                });
-            }
+            let _ = processed_for_iter.fetch_add(1, Ordering::Relaxed);
 
             parse_audio_metadata_sync(&file_path.to_string_lossy())
                 .unwrap_or_else(|_| {
@@ -941,7 +922,7 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|d| d.as_secs());
                     AudioTrack {
-                        id: format!("track_{}", uuid_simple()),
+                        id: track_id_from_path(&file_path.to_string_lossy()),
                         path: file_path.to_string_lossy().to_string(),
                         title: file_path.file_stem()
                             .map(|s| s.to_string_lossy().to_string())
@@ -949,6 +930,9 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
                         artist: "Unknown Artist".to_string(),
                         album: "Unknown Album".to_string(),
                         duration: 0.0,
+                        file_format: file_path.extension()
+                            .map(|e| e.to_string_lossy().to_lowercase())
+                            .unwrap_or_default(),
                         cover_url: None,
                         cover_id: None,
                         file_mtime,
@@ -963,6 +947,8 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
         })
         .collect();
 
+    let _ = progress_handle.join();
+
     let _ = app.emit("scan-progress", ScanProgress {
         current: total_files,
         total: total_files,
@@ -972,6 +958,11 @@ async fn scan_folder_recursive(app: AppHandle, folder_path: String, max_depth: u
 
     let mut tracks = tracks;
     tracks.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+
+    if let Ok(ref mut cache) = get_cover_cache().write() {
+        let _ = cache.flush();
+    }
+
     Ok(tracks)
 }
 
@@ -1185,6 +1176,10 @@ pub fn run() {
             if !settings_path.exists() {
                 let default_settings = AppSettings::default();
                 let _ = save_settings_sync(default_settings);
+            }
+
+            if let Ok(settings) = get_settings_sync() {
+                netease::init_api_base_url(&settings.netease_api_base_url);
             }
 
             let tray_menu = tauri::menu::MenuBuilder::new(app)

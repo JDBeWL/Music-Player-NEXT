@@ -3,7 +3,7 @@
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
-use tantivy::{doc, Index, IndexWriter, ReloadPolicy};
+use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy};
 use tantivy::tokenizer::{NgramTokenizer, SimpleTokenizer, TextAnalyzer, LowerCaser};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -11,6 +11,7 @@ use crate::AudioTrack;
 
 pub struct SearchIndex {
     index: Index,
+    reader: IndexReader,
     writer: Arc<Mutex<IndexWriter>>,
     title_field: Field,
     artist_field: Field,
@@ -18,6 +19,7 @@ pub struct SearchIndex {
     path_field: Field,
     id_field: Field,
     duration_field: Field,
+    format_field: Field,
     cover_url_field: Field,
     cover_id_field: Field,
     has_lrc_field: Field,
@@ -38,9 +40,19 @@ impl SearchIndex {
         let title_field = schema_builder.add_text_field("title", text_options.clone());
         let artist_field = schema_builder.add_text_field("artist", text_options.clone());
         let album_field = schema_builder.add_text_field("album", text_options.clone());
-        let path_field = schema_builder.add_text_field("path", STORED);
-        let id_field = schema_builder.add_text_field("id", STORED);
+
+        let string_options = TextOptions::default()
+            .set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("mixed")
+                    .set_index_option(IndexRecordOption::Basic)
+            )
+            .set_stored();
+
+        let path_field = schema_builder.add_text_field("path", string_options.clone());
+        let id_field = schema_builder.add_text_field("id", string_options);
         let duration_field = schema_builder.add_text_field("duration", STORED);
+        let format_field = schema_builder.add_text_field("format", STORED);
         let cover_url_field = schema_builder.add_text_field("cover_url", STORED);
         let cover_id_field = schema_builder.add_text_field("cover_id", STORED);
         let has_lrc_field = schema_builder.add_text_field("has_lrc", STORED);
@@ -86,8 +98,15 @@ impl SearchIndex {
         let writer = index.writer_with_num_threads(num_threads, heap_size)
             .map_err(|e| e.to_string())?;
 
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()
+            .map_err(|e: tantivy::TantivyError| e.to_string())?;
+
         Ok(SearchIndex {
             index,
+            reader,
             writer: Arc::new(Mutex::new(writer)),
             title_field,
             artist_field,
@@ -95,6 +114,7 @@ impl SearchIndex {
             path_field,
             id_field,
             duration_field,
+            format_field,
             cover_url_field,
             cover_id_field,
             has_lrc_field,
@@ -104,6 +124,9 @@ impl SearchIndex {
     pub fn add_track(&self, track: &AudioTrack) -> Result<(), String> {
         let writer = self.writer.lock().map_err(|e| e.to_string())?;
 
+        let path_term = tantivy::Term::from_field_text(self.path_field, &track.path);
+        writer.delete_term(path_term);
+
         let doc = doc!(
             self.title_field => track.title.clone(),
             self.artist_field => track.artist.clone(),
@@ -111,6 +134,7 @@ impl SearchIndex {
             self.path_field => track.path.clone(),
             self.id_field => track.id.clone(),
             self.duration_field => track.duration.to_string(),
+            self.format_field => track.file_format.clone(),
             self.cover_url_field => track.cover_url.clone().unwrap_or_default(),
             self.cover_id_field => track.cover_id.clone().unwrap_or_default(),
             self.has_lrc_field => if track.has_lrc { "1" } else { "0" }.to_string(),
@@ -123,6 +147,9 @@ impl SearchIndex {
     pub fn add_tracks(&self, tracks: &[AudioTrack]) -> Result<(), String> {
         let writer = self.writer.lock().map_err(|e| e.to_string())?;
         for track in tracks {
+            let path_term = tantivy::Term::from_field_text(self.path_field, &track.path);
+            writer.delete_term(path_term);
+
             let doc = doc!(
                 self.title_field => track.title.clone(),
                 self.artist_field => track.artist.clone(),
@@ -130,6 +157,7 @@ impl SearchIndex {
                 self.path_field => track.path.clone(),
                 self.id_field => track.id.clone(),
                 self.duration_field => track.duration.to_string(),
+                self.format_field => track.file_format.clone(),
                 self.cover_url_field => track.cover_url.clone().unwrap_or_default(),
                 self.cover_id_field => track.cover_id.clone().unwrap_or_default(),
                 self.has_lrc_field => if track.has_lrc { "1" } else { "0" }.to_string(),
@@ -177,13 +205,7 @@ impl SearchIndex {
     }
 
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<AudioTrack>, String> {
-        let reader = self.index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
-            .try_into()
-            .map_err(|e: tantivy::TantivyError| e.to_string())?;
-
-        let searcher = reader.searcher();
+        let searcher = self.reader.searcher();
 
         // 使用 ngram tokenizer 进行查询解析
         let mut query_parser = QueryParser::for_index(
@@ -226,6 +248,10 @@ impl SearchIndex {
                 .and_then(|v| v.as_str())
                 .unwrap_or("0");
             let duration: f64 = duration_str.parse().unwrap_or(0.0);
+            let file_format = retrieved_doc.get_first(self.format_field)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
             let cover_url = retrieved_doc.get_first(self.cover_url_field)
                 .and_then(|v| v.as_str())
                 .map(|s| if s.is_empty() { None } else { Some(s.to_string()) })
@@ -246,6 +272,7 @@ impl SearchIndex {
                 artist,
                 album,
                 duration,
+                file_format,
                 cover_url,
                 cover_id,
                 file_mtime: None,

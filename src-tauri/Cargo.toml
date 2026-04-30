@@ -1,6 +1,6 @@
 [package]
 name = "MPNEXT"
-version = "0.2.0"
+version = "0.2.1"
 description = "Mercurial Player NEXT"
 authors = ["JDBeWL"]
 edition = "2024"
@@ -27,3 +27,4 @@ image = "0.25"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 rayon = "1.10"
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls", "gzip", "deflate"] }
+uuid = { version = "1", features = ["v4"] }

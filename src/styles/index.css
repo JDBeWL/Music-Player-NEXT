@@ -9,12 +9,12 @@
   ============================================ */
 
   /* === 主品牌色 === */
-  --color-primary: #91c4c7;
-  --color-primary-dark: #6aadb1;
+  --color-primary: #5BABAE;
+  --color-primary-dark: #005457;
   --color-primary-light: #b8dbdd;
-  --color-primary-container: rgba(145, 196, 199, 0.15);
-  --color-on-primary-container: #91c4c7;
-  --color-on-primary: #000000;
+  --color-primary-container: rgba(91, 171, 174, 0.15);
+  --color-on-primary-container: #5BABAE;
+  --color-on-primary: #ffffff;
   --color-on-primary-light: #000000;
 
   /* === MD3 Tonal Palette - 基于主色的色调 (用于状态层) === */
@@ -23,14 +23,14 @@
   --tone-10: #001a1b;
   --tone-20: #002f31;
   --tone-30: #004648;
-  --tone-40: #91c4c7;
-  --tone-50: #6aadb1;
-  --tone-60: #46979b;
-  --tone-70: #268085;
-  --tone-80: #0d6870;
-  --tone-90: #00505b;
-  --tone-95: #003d43;
-  --tone-99: #002728;
+  --tone-40: #5BABAE;
+  --tone-50: #4A9497;
+  --tone-60: #2d7d80;
+  --tone-70: #0d6870;
+  --tone-80: #005457;
+  --tone-90: #003d3f;
+  --tone-95: #002d30;
+  --tone-99: #002022;
   --tone-100: #ffffff;
 
   /* Neutral tones */
@@ -138,14 +138,14 @@
   --bg-surface-variant: rgba(55, 55, 55, 0.9);
 
   --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.8);
-  --text-tertiary: rgba(255, 255, 255, 0.6);
+  --text-secondary: rgba(255, 255, 255, 0.85);
+  --text-tertiary: rgba(255, 255, 255, 0.68);
   --text-disabled: rgba(255, 255, 255, 0.38);
   --text-on-primary: #000000;
 
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-subtle: rgba(255, 255, 255, 0.10);
+  --border-default: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.22);
 
   /* 状态层 */
   --hover-overlay: var(--state-hover-light);
@@ -155,7 +155,7 @@
 
   /* 组件特定 */
   --btn-primary-bg: var(--color-primary);
-  --btn-primary-text: #ffffff;
+  --btn-primary-text: #f8f8f8;
   --btn-secondary-bg: rgba(255, 255, 255, 0.1);
   --btn-secondary-text: var(--text-primary);
   --btn-tertiary-bg: transparent;
@@ -230,8 +230,8 @@
   --bg-surface-variant: rgba(255, 255, 255, 0.9);
 
   --text-primary: #1a1a1a;
-  --text-secondary: rgba(26, 26, 26, 0.8);
-  --text-tertiary: rgba(26, 26, 26, 0.6);
+  --text-secondary: rgba(26, 26, 26, 0.80);
+  --text-tertiary: rgba(26, 26, 26, 0.66);
   --text-disabled: rgba(26, 26, 26, 0.38);
   --text-on-primary: #ffffff;
 
@@ -245,7 +245,7 @@
   --dragged-overlay: var(--state-dragged-dark);
 
   --btn-primary-bg: var(--color-primary);
-  --btn-primary-text: #ffffff;
+  --btn-primary-text: #f8f8f8;
   --btn-secondary-bg: rgba(0, 0, 0, 0.08);
   --btn-secondary-text: var(--text-primary);
   --btn-tertiary-bg: transparent;
@@ -560,7 +560,7 @@
     width: 52px;
     height: 32px;
     border-radius: 16px;
-    border: 2px solid var(--text-disabled);
+    border: 1px solid var(--border-default);
     background: transparent;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -576,7 +576,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: var(--text-disabled);
+    background: var(--text-tertiary);
     transition: all 0.2s ease;
   }
 

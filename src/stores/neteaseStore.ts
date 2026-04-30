@@ -285,7 +285,8 @@ export const useNeteaseStore = defineStore('netease', () => {
       title: song.name,
       artist: artists.map((a) => a.name).join(' / '),
       album: album?.name || '未知专辑',
-      duration: durationMs / 1000, // 毫秒转秒
+      duration: durationMs / 1000,
+      format: 'mp3',
       coverUrl: album?.picUrl || undefined,
       hasLrc: false,
     };

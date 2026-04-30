@@ -227,6 +227,7 @@ export default {
                     filter: `blur(var(--lyric-blur))`,
                     opacity: 'var(--lyric-opacity)',
                     transform: `scale(var(--lyric-scale))`,
+                    color: distance === 0 ? 'var(--color-primary)' : 'var(--text-tertiary)',
                 };
             } else {
                 if (distance === 0) {
@@ -234,6 +235,7 @@ export default {
                         '--align-origin': 'center center',
                         textAlign: 'center',
                         fontFamily: 'inherit',
+                        color: 'var(--color-primary)',
                     };
                 }
 
@@ -244,6 +246,7 @@ export default {
                     textAlign: 'center',
                     fontFamily: 'inherit',
                     opacity: 'var(--lyric-opacity)',
+                    color: 'var(--text-tertiary)',
                 };
             }
         };

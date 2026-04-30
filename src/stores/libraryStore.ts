@@ -35,10 +35,7 @@ export const useLibraryStore = defineStore('library', () => {
   });
 
   async function preloadAllCovers(playlists: Playlist[]) {
-    console.log('[LibraryStore] Starting to preload covers for', libraryTracks.value.length, 'tracks');
-
     if (libraryTracks.value.length === 0) {
-      console.log('[LibraryStore] No tracks in library to preload covers');
       return;
     }
 
@@ -47,11 +44,10 @@ export const useLibraryStore = defineStore('library', () => {
         tracks: libraryTracks.value
       });
 
-      console.log('[LibraryStore] Backend processed covers for', updatedTracks.length, 'tracks');
-
       let updatedCount = 0;
+      const trackMap = new Map(libraryTracks.value.map(t => [t.id, t]));
       updatedTracks.forEach(updatedTrack => {
-        const track = libraryTracks.value.find(t => t.id === updatedTrack.id);
+        const track = trackMap.get(updatedTrack.id);
         if (track) {
           if (updatedTrack.coverUrl && track.coverUrl !== updatedTrack.coverUrl) {
             track.coverUrl = updatedTrack.coverUrl;
@@ -65,11 +61,7 @@ export const useLibraryStore = defineStore('library', () => {
       });
 
       if (updatedCount > 0) {
-        console.log(`[LibraryStore] Updated cover info for ${updatedCount} tracks`);
         await saveLibrary(playlists);
-        console.log('[LibraryStore] All covers preloaded and saved');
-      } else {
-        console.log('[LibraryStore] No cover info needed update');
       }
     } catch (error) {
       console.error('[LibraryStore] Failed to preload covers:', error);
@@ -83,32 +75,27 @@ export const useLibraryStore = defineStore('library', () => {
       }
 
       const lrcPath = track.path.replace(/\.[^.]+$/, '.lrc');
-      console.log('[LibraryStore] Trying to load LRC lyrics from:', lrcPath);
 
       const lrcUrl = convertFileSrc(lrcPath);
       let response = await fetch(lrcUrl);
 
       if (response.ok) {
         const lrcText = await response.text();
-        console.log('[LibraryStore] LRC lyrics loaded, length:', lrcText.length);
         track.lrc = lrcText;
         return lrcText;
       }
 
       const assPath = track.path.replace(/\.[^.]+$/, '.ass');
-      console.log('[LibraryStore] LRC not found, trying to load ASS lyrics from:', assPath);
 
       const assUrl = convertFileSrc(assPath);
       response = await fetch(assUrl);
 
       if (response.ok) {
         const assText = await response.text();
-        console.log('[LibraryStore] ASS lyrics loaded, length:', assText.length);
         track.lrc = assText;
         return assText;
       }
 
-      console.log('[LibraryStore] No lyrics file found (tried .lrc and .ass)');
       return undefined;
     } catch (error) {
       console.warn('[LibraryStore] Failed to load lyrics:', error);
@@ -185,8 +172,6 @@ export const useLibraryStore = defineStore('library', () => {
           console.warn('[LibraryStore] Failed to remove tracks from index:', error);
         }
       }
-
-      console.log(`[LibraryStore] Removed folder ${folderPath} and ${tracksToRemove.length} tracks`);
     } catch (error) {
       console.error('[LibraryStore] Failed to remove folder:', error);
     }
@@ -210,7 +195,6 @@ export const useLibraryStore = defineStore('library', () => {
       }
 
       if (existingFolders.length !== libraryFolders.value.length) {
-        console.log(`[LibraryStore] Removed ${libraryFolders.value.length - existingFolders.length} invalid folders`);
         libraryFolders.value = existingFolders;
       }
 
@@ -239,10 +223,6 @@ export const useLibraryStore = defineStore('library', () => {
       });
 
       const tracksToProcess = [...newFiles, ...modifiedFiles];
-      const unchangedCount = allFiles.length - tracksToProcess.length;
-      const removedCount = removedTracks.length;
-
-      console.log(`[LibraryStore] Incremental scan: ${unchangedCount} unchanged, ${tracksToProcess.length} to process, ${removedCount} removed`);
 
       const parsedTracks: AudioTrack[] = [];
       const batchSize = 5;
@@ -284,8 +264,6 @@ export const useLibraryStore = defineStore('library', () => {
       finalTracks.sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
 
       if (removedTracks.length > 0) {
-        console.log(`[LibraryStore] Removing ${removedTracks.length} tracks from index and cache`);
-
         try {
           const trackIds = removedTracks.map(t => t.id);
           await invoke('remove_tracks_from_index', { trackIds });
@@ -309,19 +287,30 @@ export const useLibraryStore = defineStore('library', () => {
       // 保存扫描结果到后端
       try {
         await saveLibrary(playlists);
-        console.log('[LibraryStore] Scan results saved to backend');
       } catch (error) {
         console.error('[LibraryStore] Failed to save scan results:', error);
       }
 
       if (tracksToProcess.length > 0) {
+        if (modifiedFiles.length > 0) {
+          const modifiedPaths = new Set(modifiedFiles.map(f => f.path));
+          const oldModifiedTracks = libraryTracks.value.filter(t => modifiedPaths.has(t.path));
+          if (oldModifiedTracks.length > 0) {
+            try {
+              const trackIds = oldModifiedTracks.map(t => t.id);
+              await invoke('remove_tracks_from_index', { trackIds });
+            } catch (error) {
+              console.warn('[LibraryStore] Failed to remove modified tracks from index:', error);
+            }
+          }
+        }
+
         try {
           await invoke('add_tracks_to_index', { tracks: parsedTracks });
         } catch (error) {
           console.warn('[LibraryStore] Failed to add tracks to index:', error);
         }
 
-        console.log('[LibraryStore] Scan complete, starting cover preload...');
         await preloadAllCovers(playlists);
       }
     } catch (error) {
@@ -343,11 +332,9 @@ export const useLibraryStore = defineStore('library', () => {
       const folderPath = await invoke<string | null>('open_folder_dialog');
 
       if (!folderPath) {
-        console.log('[LibraryStore] No folder selected');
         return;
       }
 
-      console.log('[LibraryStore] Folder selected:', folderPath);
       isLocalBrowserOpen.value = true;
       localFiles.value = [];
       selectedFileIds.value.clear();

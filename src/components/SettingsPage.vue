@@ -806,14 +806,14 @@ function getFolderName(folderPath: string): string {
                 <span class="block text-sm text-[var(--text-tertiary)]">重新打开时恢复上次的播放进度</span>
               </div>
               <button
-                class="md3-switch"
-                :class="{ 'md3-switch-active': configStore.persistPlayback }"
-                @click="configStore.setPersistPlayback(!configStore.persistPlayback)"
+                class="w-12 h-7 rounded-full transition-colors relative"
+                :class="configStore.persistPlayback ? 'bg-[var(--color-primary)]' : 'bg-[var(--border-default)]'"
                 role="switch"
                 :aria-checked="configStore.persistPlayback"
                 aria-label="记住播放状态"
+                @click="configStore.setPersistPlayback(!configStore.persistPlayback)"
               >
-                <span class="md3-switch-thumb"></span>
+                <span class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform" :class="configStore.persistPlayback ? 'left-6' : 'left-1'"></span>
               </button>
             </div>
           </div>
@@ -865,7 +865,7 @@ function getFolderName(folderPath: string): string {
             <div class="border-t border-[var(--border-subtle)] pt-3 space-y-2">
               <div class="flex items-center justify-between text-sm">
                 <span class="text-[var(--text-primary)]">版本</span>
-                <span class="text-[var(--text-secondary)]">0.2.0</span>
+                <span class="text-[var(--text-secondary)]">0.2.1</span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-[var(--text-primary)]">技术栈</span>

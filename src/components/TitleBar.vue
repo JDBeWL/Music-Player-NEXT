@@ -173,10 +173,18 @@ function onBlur() {
               <Music v-else :size="14" class="result-icon" />
             </div>
             <div class="result-info">
-              <span class="result-title">{{ track.title }}</span>
-              <span class="result-artist">{{ track.artist }}</span>
+              <div class="result-title-row">
+                <span class="result-title">{{ track.title }}</span>
+              </div>
+              <span class="result-artist">
+                <span v-if="track.format" class="result-format">{{ track.format.toUpperCase() }}</span>
+                {{ track.artist }}
+              </span>
             </div>
-            <span class="result-hint">下一首播放</span>
+            <div class="result-right">
+              <span class="result-path-display">{{ track.path.split(/[/\\]/).slice(0, -1).join('/') }}</span>
+              <span class="result-hint">下一首播放</span>
+            </div>
           </div>
           <div v-if="searchResults.length === 0 && !isSearching" class="search-empty">
             未找到匹配的歌曲
@@ -419,6 +427,13 @@ function onBlur() {
   gap: 1px;
 }
 
+.result-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .result-title {
   font-size: 13px;
   font-weight: 500;
@@ -426,6 +441,8 @@ function onBlur() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .result-artist {
@@ -434,6 +451,43 @@ function onBlur() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-format {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+  line-height: 16px;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+
+.result-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 200px;
+}
+
+.result-path-display {
+  font-size: 10px;
+  color: var(--text-disabled);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .result-hint {

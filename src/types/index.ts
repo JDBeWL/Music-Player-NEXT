@@ -7,6 +7,7 @@ export interface AudioTrack {
   artist: string;
   album: string;
   duration: number;
+  format: string;
   coverUrl?: string;
   coverId?: string;
   lrc?: string;
@@ -64,4 +65,10 @@ export interface LyricLine {
   texts?: string[];
   words?: KaraokeWord[];
   karaoke?: KaraokeInfo | null;
+}
+
+export const FFMPEG_FORMATS = ['ape', 'wma', 'tak', 'tta'] as const;
+
+export function needsFFmpegConversion(format: string): boolean {
+  return (FFMPEG_FORMATS as readonly string[]).includes(format.toLowerCase());
 }

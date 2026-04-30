@@ -143,8 +143,7 @@ fn compute_hash(data: &[u8]) -> u64 {
 
 impl CoverCache {
     pub fn new() -> std::io::Result<Self> {
-        let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-        let cache_root = base.join("MercurialPlayerNEXT").join("covers");
+        let cache_root = crate::get_data_dir().join("covers");
         let dir = cache_root.join("full");
         let thumb_dir = cache_root.join("thumb");
         let index_path = cache_root.join("index.json");
@@ -317,7 +316,6 @@ impl CoverCache {
         self.record_access(&id);
         self.mark_dirty();
         self.evict_if_needed();
-        let _ = self.save_index();
 
         Ok(entry)
     }
@@ -394,6 +392,10 @@ impl CoverCache {
         &self.dir
     }
 
+    pub fn flush(&mut self) -> Result<(), String> {
+        self.save_index()
+    }
+
     pub fn clear(&mut self) -> std::io::Result<()> {
         for entry in self.index.values() {
             let _ = fs::remove_file(&entry.cover_path);
@@ -456,13 +458,7 @@ impl CoverCache {
 }
 
 pub fn uuid_simple() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let rand_part = (nanos.wrapping_mul(6364136223846793005) ^ 1442695040888963407) as u64;
-    format!("{:x}{:08x}", nanos, (rand_part & 0xFFFFFFFF) as u32)
+    uuid::Uuid::new_v4().to_string()
 }
 
 pub fn extract_cover_from_path(path: &str) -> std::io::Result<Option<Vec<u8>>> {

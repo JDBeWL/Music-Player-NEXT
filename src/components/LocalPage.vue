@@ -472,11 +472,17 @@ function deselectAllFiles() {
             </div>
 
             <div class="flex-1 min-w-0">
-              <div class="text-[var(--text-primary)] text-sm font-medium truncate">{{ track.title }}</div>
-              <div class="text-[var(--text-tertiary)] text-xs truncate">{{ track.artist }}{{ track.album && track.album !== 'Unknown' ? ` · ${track.album}` : '' }}</div>
+              <div class="flex items-center gap-2">
+                <span class="text-[var(--text-primary)] text-sm font-medium truncate flex-1 min-w-1">{{ track.title }}</span>
+              </div>
+              <div class="text-[var(--text-tertiary)] text-xs flex items-center overflow-hidden gap-1 min-w-0">
+                <span v-if="track.format" class="track-format-tag shrink-0">{{ track.format.toUpperCase() }}</span>
+                <span class="truncate min-w-0 flex-shrink">{{ track.artist }}{{ track.album && track.album !== 'Unknown' ? ` · ${track.album}` : '' }}</span>
+              </div>
             </div>
 
             <div class="track-actions">
+              <span class="track-path-text group-hover:opacity-0">{{ track.path.split(/[/\\]/).slice(0, -1).join('/') }}</span>
               <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
               <div class="track-action-btns opacity-0 group-hover:opacity-100">
                 <button
@@ -604,6 +610,7 @@ function deselectAllFiles() {
   align-items: flex-end;
   min-width: 68px;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .track-time {
@@ -624,6 +631,30 @@ function deselectAllFiles() {
   align-items: center;
   gap: 2px;
   transition: opacity 0.15s ease;
+}
+
+.track-format-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+  line-height: 16px;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+
+.track-path-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+  line-height: 22px;
+  text-align: right;
 }
 
 /* 局部下拉菜单滚动条样式 */

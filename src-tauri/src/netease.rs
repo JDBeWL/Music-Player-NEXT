@@ -8,13 +8,32 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::io::Write;
+use std::fs;
 use tauri_plugin_dialog::DialogExt;
+
+const DEFAULT_API_BASE_URL: &str = "https://netease-cloud-music-api-two-sandy.vercel.app";
+
+fn read_api_base_url_from_settings() -> String {
+    let path = crate::get_settings_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(url) = json.get("netease_api_base_url").and_then(|v| v.as_str()) {
+                    if !url.is_empty() {
+                        return url.to_string();
+                    }
+                }
+            }
+        }
+    }
+    DEFAULT_API_BASE_URL.to_string()
+}
 
 static API_BASE_URL: OnceLock<Mutex<String>> = OnceLock::new();
 
 fn get_api_base_url() -> &'static Mutex<String> {
     API_BASE_URL.get_or_init(|| {
-        Mutex::new("https://netease-cloud-music-api-two-sandy.vercel.app".to_string())
+        Mutex::new(read_api_base_url_from_settings())
     })
 }
 
@@ -56,11 +75,33 @@ fn get_default_headers() -> HeaderMap {
     headers
 }
 
+/// 初始化 API 基地址（从配置文件读取后调用）
+pub fn init_api_base_url(url: &str) {
+    if !url.is_empty() {
+        if let Ok(mut base) = get_api_base_url().lock() {
+            *base = url.to_string();
+        }
+    }
+}
+
 /// 设置 API 基地址
 #[tauri::command]
 pub fn set_netease_api_base(url: String) {
     if let Ok(mut base) = get_api_base_url().lock() {
-        *base = url;
+        *base = url.clone();
+    }
+    let path = crate::get_settings_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(obj) = json.as_object_mut() {
+                    obj.insert("netease_api_base_url".to_string(), Value::String(url));
+                    if let Ok(new_content) = serde_json::to_string_pretty(&json) {
+                        let _ = fs::write(&path, new_content);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -250,9 +291,6 @@ pub async fn download_netease_song(
     save_path: String,
     metadata: SongMetadata,
 ) -> Result<String, String> {
-    println!("[download_netease_song] Downloading from: {}", url);
-    println!("[download_netease_song] Save to: {}", save_path);
-
     let headers = get_default_headers();
 
     // 下载音频（使用无超时的下载客户端）
@@ -303,9 +341,6 @@ pub async fn download_netease_song(
         .map_err(|e| format!("写入文件失败: {}", e))?;
     drop(file);
 
-    println!("[download_netease_song] Downloaded {} bytes, writing metadata...", audio_bytes.len());
-
-    // 写入元数据
     let sp = save_path.clone();
     let md = metadata;
     let cd = cover_data;
@@ -314,10 +349,8 @@ pub async fn download_netease_song(
     })
     .await
     .map_err(|e| format!("元数据写入任务失败: {}", e))?
-    .map_err(|e| println!("[download_netease_song] Warning: metadata write failed: {}", e))
     .ok();
 
-    println!("[download_netease_song] Complete: {}", save_path);
     Ok(save_path)
 }
 
@@ -387,8 +420,6 @@ fn write_audio_metadata(
     tagged_file.save_to_path(file_path, WriteOptions::default())
         .map_err(|e| format!("保存元数据失败: {}", e))?;
 
-    println!("[write_audio_metadata] Metadata written: {} - {} [{}]",
-        metadata.artist, metadata.title, metadata.album);
     Ok(())
 }
 
