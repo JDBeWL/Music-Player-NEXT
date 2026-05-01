@@ -473,10 +473,9 @@ async fn remove_folder(folder_path: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let lib = get_library_sync().map_err(|e| e.to_string())?;
         // Normalize path separators for comparison (Windows uses both / and \)
-        let normalized_folder = folder_path_clone.replace('\\', "/");
+        let normalized_folder = normalize_path(&folder_path_clone);
         let matches_folder = |track_path: &str| -> bool {
-            let normalized_track = track_path.replace('\\', "/");
-            normalized_track.starts_with(&normalized_folder)
+            normalize_path(track_path).starts_with(&normalized_folder)
         };
 
         let track_ids: Vec<String> = lib.tracks.iter()

@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
-import { X } from 'lucide-vue-next';
+import { ref, computed, watch } from 'vue';
 import { usePlaybackStore } from './stores/playbackStore';
-import { useLibraryStore } from './stores/libraryStore';
 import { usePlaylistStore } from './stores/playlistStore';
-import { useConfigStore } from './stores/configStore';
-import { useNeteaseStore } from './stores/neteaseStore';
+import { useLibraryStore } from './stores/libraryStore';
 import { useThemeColor } from './composables/useThemeColor';
 import { useNavigation } from './composables/useNavigation';
 import { usePlayerControls } from './composables/usePlayerControls';
 import { usePlaylistManager } from './composables/usePlaylistManager';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
+import { useAppInit } from './composables/useAppInit';
 import Sidebar from './components/Sidebar.vue';
 import TitleBar from './components/TitleBar.vue';
 import PlayerBar from './components/PlayerBar.vue';
@@ -19,12 +16,12 @@ import QueuePanel from './components/QueuePanel.vue';
 import NowPlayingPanel from './components/NowPlayingPanel.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import PromptDialog from './components/PromptDialog.vue';
+import CloseHintDialog from './components/CloseHintDialog.vue';
+import AddToPlaylistDialog from './components/AddToPlaylistDialog.vue';
 
 const playbackStore = usePlaybackStore();
 const libraryStore = useLibraryStore();
 const playlistStore = usePlaylistStore();
-const configStore = useConfigStore();
-const neteaseStore = useNeteaseStore();
 const { updateThemeFromCover } = useThemeColor();
 
 const {
@@ -41,7 +38,6 @@ const {
 
 const {
   isCurrentTrackFavorite,
-  handlePlayNext,
   cycleRepeatMode,
   toggleShuffle,
   toggleFavorite,
@@ -57,13 +53,15 @@ const {
   requestDeletePlaylist,
   confirmDeletePlaylist,
   cancelDeletePlaylist,
-  handleAddToPlaylist,
 } = usePlaylistManager();
+
+const closeHintDialogRef = ref<InstanceType<typeof CloseHintDialog> | null>(null);
+
+useKeyboardShortcuts();
+useAppInit(closeHintDialogRef as any);
 
 const showQueuePanel = ref(false);
 const showNowPlayingPanel = ref(false);
-const showCloseHintDialog = ref(false);
-const rememberCloseChoice = ref(false);
 
 const favoritePaths = computed(() => {
   const fav = playlistStore.favoritePlaylist;
@@ -73,122 +71,6 @@ const favoritePaths = computed(() => {
 
 function handleToggleFavorite(track: any) {
   playlistStore.toggleFavorite(track);
-}
-
-onMounted(async () => {
-  playbackStore.initPlayerListeners();
-  playbackStore.setOnTrackEndCallback(handlePlayNext);
-
-  await configStore.loadConfig();
-
-  neteaseStore.init();
-
-  const [loadedPlaylists] = await Promise.all([
-    libraryStore.loadLibrary(),
-    playbackStore.loadVolumeSettings()
-  ]);
-
-  // 加载保存的播放列表
-  if (loadedPlaylists.length > 0) {
-    playlistStore.playlists = loadedPlaylists;
-  }
-
-  // 确保"我喜欢的音乐"播放列表存在
-  playlistStore.ensureFavoritePlaylist();
-
-  const { playlistId } = await playbackStore.loadPlaybackState();
-  if (playlistId && configStore.persistPlayback) {
-    const playlist = playlistStore.playlists.find(p => p.id === playlistId);
-    if (playlist) {
-      playlistStore.currentPlaylistId = playlistId;
-      await playbackStore.restorePlaybackState(playlist.tracks, playlistId);
-    }
-  }
-
-  if (libraryStore.libraryTracks.length > 0) {
-    console.log('[App] Starting cover preload...');
-    libraryStore.preloadAllCovers(playlistStore.playlists);
-  }
-
-  window.addEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);
-  window.addEventListener('keydown', handleGlobalKeydown);
-
-  listen('show-close-hint-dialog', () => {
-    showCloseHintDialog.value = true;
-  });
-});
-
-onUnmounted(() => {
-  playbackStore.destroyPlayerListeners();
-  window.removeEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);
-  window.removeEventListener('keydown', handleGlobalKeydown);
-});
-
-function handleGlobalKeydown(e: KeyboardEvent) {
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-    return;
-  }
-
-  for (const [action, shortcut] of Object.entries(configStore.keyboardShortcuts)) {
-    if (
-      e.code === shortcut.code &&
-      e.shiftKey === shortcut.shift &&
-      e.ctrlKey === shortcut.ctrl &&
-      e.altKey === shortcut.alt
-    ) {
-      e.preventDefault();
-      switch (action) {
-        case 'togglePlay':
-          playbackStore.togglePlay();
-          break;
-        case 'navigateBack':
-          navigateBack();
-          break;
-        case 'navigateForward':
-          navigateForward();
-          break;
-        case 'toggleShuffle':
-          toggleShuffle();
-          break;
-        case 'cycleRepeat':
-          cycleRepeatMode();
-          break;
-        case 'playNext':
-          handlePlayNext();
-          break;
-        case 'playPrev':
-          playbackStore.playPrev();
-          break;
-      }
-      return;
-    }
-  }
-}
-
-function handleSavePlaybackBeforeClose() {
-  if (configStore.persistPlayback) {
-    playbackStore.savePlaybackState(playbackStore.currentPlaylistId);
-  }
-}
-
-function handleCloseHintConfirm(remember: boolean) {
-  if (remember) {
-    configStore.setCloseBehavior('quit');
-  }
-  showCloseHintDialog.value = false;
-  invoke('quit_app').catch(console.error);
-}
-
-async function handleCloseHintCancel(remember: boolean) {
-  if (remember) {
-    await configStore.setCloseBehavior('to_tray');
-  }
-  showCloseHintDialog.value = false;
-  await invoke('hide_window').catch(console.error);
-}
-
-function handleCloseHintDismiss() {
-  showCloseHintDialog.value = false;
 }
 
 watch(() => playbackStore.currentCoverUrl, (coverUrl) => {
@@ -270,31 +152,7 @@ async function _confirmDeletePlaylist() {
             @toggle-favorite="handleToggleFavorite"
           />
 
-          <div v-if="showPlaylistDialog" class="dialog-overlay" @click="showPlaylistDialog = false">
-            <div class="dialog-content md3-surface-tinted" @click.stop>
-              <div class="dialog-header">
-                <h3 class="text-lg font-semibold text-[var(--text-primary)]">添加到播放列表</h3>
-                <button class="md3-icon-btn-xs state-layer text-[var(--text-tertiary)]" @click="showPlaylistDialog = false">×</button>
-              </div>
-              <div class="dialog-body">
-                <div v-if="playlistStore.playlists.length === 0" class="text-center py-16 px-5">
-                  <p class="text-[var(--text-tertiary)]">还没有播放列表</p>
-                  <p class="text-sm text-[var(--text-disabled)] mt-1">请先创建一个播放列表</p>
-                </div>
-                <div v-else class="space-y-2">
-                  <button
-                    v-for="playlist in playlistStore.playlists"
-                    :key="playlist.id"
-                    class="w-full flex items-center justify-between px-4 py-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-container)]/30 transition-all text-left"
-                    @click="handleAddToPlaylist(playlist.id)"
-                  >
-                    <span class="text-sm font-medium text-[var(--text-primary)]">{{ playlist.name }}</span>
-                    <span class="text-xs text-[var(--text-tertiary)]">{{ playlist.tracks.length }} 首</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AddToPlaylistDialog v-model="showPlaylistDialog" />
         </main>
       </div>
     </div>
@@ -344,46 +202,7 @@ async function _confirmDeletePlaylist() {
       @cancel="showCreatePrompt = false"
     />
 
-    <!-- 首次关闭提示对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showCloseHintDialog"
-        class="close-hint-overlay"
-        @click.self="handleCloseHintDismiss"
-        role="presentation"
-      >
-        <div
-          class="close-hint-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="close-hint-title"
-        >
-          <div class="close-hint-header">
-            <h3 id="close-hint-title" class="close-hint-title">选择关闭行为</h3>
-            <button class="close-hint-close" @click="handleCloseHintDismiss" aria-label="关闭对话框">
-              <X :size="18" />
-            </button>
-          </div>
-
-          <div class="close-hint-body">
-            <p>关闭按钮将直接退出应用。如果想最小化到托盘，请在设置中修改关闭按钮行为。您希望如何处理？</p>
-            <label class="close-hint-remember">
-              <input
-                v-model="rememberCloseChoice"
-                type="checkbox"
-                class="close-hint-checkbox"
-              />
-              <span>记住我的选择，不再询问</span>
-            </label>
-          </div>
-
-          <div class="close-hint-footer">
-            <button class="btn-cancel" @click="handleCloseHintCancel(rememberCloseChoice)">最小化到托盘</button>
-            <button class="btn-confirm warning" @click="handleCloseHintConfirm(rememberCloseChoice)">直接退出</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <CloseHintDialog ref="closeHintDialogRef" />
   </div>
 </template>
 
@@ -428,175 +247,5 @@ async function _confirmDeletePlaylist() {
 
 .content-area {
   @apply flex-1 flex overflow-hidden;
-}
-
-.dialog-overlay {
-  @apply fixed inset-0 flex items-center justify-center z-[2000];
-  background: var(--scrim);
-  backdrop-filter: blur(16px) var(--glass-saturate);
-  -webkit-backdrop-filter: blur(16px) var(--glass-saturate);
-}
-
-.dialog-content {
-  @apply border rounded-3xl w-[90%] max-w-md max-h-[600px] flex flex-col shadow-2xl elevation-3;
-  border-color: var(--border-subtle);
-}
-
-.dialog-header {
-  @apply flex items-center justify-between p-5;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.dialog-body {
-  @apply flex-1 overflow-y-auto p-4;
-}
-
-.close-hint-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--scrim);
-  backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  animation: fadeIn 0.15s ease;
-}
-
-.close-hint-dialog {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 24px;
-  width: 400px;
-  max-width: 90vw;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  animation: slideUp 0.2s ease;
-}
-
-.close-hint-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 20px 0;
-}
-
-.close-hint-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.close-hint-icon.warning {
-  background: #fef3c7;
-  color: #eab308;
-}
-
-.close-hint-title {
-  flex: 1;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.close-hint-close {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  color: var(--text-disabled);
-  cursor: pointer;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-
-.close-hint-close:hover {
-  background: var(--hover-overlay);
-  color: var(--text-primary);
-}
-
-.close-hint-body {
-  padding: 16px 20px;
-}
-
-.close-hint-body p {
-  margin: 0 0 16px;
-  font-size: 14px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.close-hint-remember {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  user-select: none;
-}
-
-.close-hint-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--color-primary);
-  cursor: pointer;
-}
-
-.close-hint-footer {
-  display: flex;
-  gap: 12px;
-  padding: 0 20px 20px;
-  justify-content: flex-end;
-}
-
-.btn-cancel,
-.btn-confirm {
-  padding: 8px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
-}
-
-.btn-cancel {
-  background: var(--hover-overlay);
-  color: var(--text-secondary);
-}
-
-.btn-cancel:hover {
-  background: var(--pressed-overlay);
-  color: var(--text-primary);
-}
-
-.btn-confirm {
-  color: var(--text-on-primary);
-}
-
-.btn-confirm.warning {
-  background: #eab308;
-}
-
-.btn-confirm.warning:hover {
-  background: #ca8a04;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideUp {
-  from { transform: translateY(10px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
 }
 </style>

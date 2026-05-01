@@ -4,6 +4,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import type { AudioTrack, ScanProgress, FileInfo, Playlist } from '@/types';
 import { saveLibraryToBackend, loadLibraryFromBackend } from '@/services/persistence/libraryPersistence';
+import { usePlaylistStore } from './playlistStore';
 
 export const useLibraryStore = defineStore('library', () => {
   const libraryFolders = ref<string[]>([]);
@@ -114,6 +115,11 @@ export const useLibraryStore = defineStore('library', () => {
     } catch (error) {
       console.error('[LibraryStore] Failed to save library:', error);
     }
+  }
+
+  async function persistLibrary() {
+    const playlistStore = usePlaylistStore();
+    await saveLibrary(playlistStore.playlists);
   }
 
   async function loadLibrary(): Promise<Playlist[]> {
@@ -370,6 +376,7 @@ export const useLibraryStore = defineStore('library', () => {
     tracksByFolder,
     loadLibrary,
     saveLibrary,
+    persistLibrary,
     addFolder,
     removeFolder,
     scanLibraryFolders,

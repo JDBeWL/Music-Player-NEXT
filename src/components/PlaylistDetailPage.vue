@@ -7,26 +7,12 @@ import { formatTime } from '@/utils/format';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { useLibraryStore } from '@/stores/libraryStore';
-import { saveLibraryToBackend } from '@/services/persistence/libraryPersistence';
 import type { AudioTrack } from '@/types';
 
 const route = useRoute();
 const playbackStore = usePlaybackStore();
 const playlistStore = usePlaylistStore();
 const libraryStore = useLibraryStore();
-
-async function persistLibrary() {
-  try {
-    await saveLibraryToBackend(
-      libraryStore.libraryFolders,
-      playlistStore.playlists,
-      libraryStore.libraryTracks,
-      libraryStore.scanDepth
-    );
-  } catch (error) {
-    console.error('[PlaylistDetailPage] Failed to persist library:', error);
-  }
-}
 
 const playlistId = computed(() => route.params.id as string);
 const playlist = computed(() => playlistStore.playlists.find(p => p.id === playlistId.value)!);
@@ -145,7 +131,7 @@ async function handleMouseUp(e: MouseEvent) {
   const toIndex = dragOverIndex.value;
   if (dragDistance >= DRAG_THRESHOLD && fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
     if (playlistId.value) playlistStore.reorderPlaylistTracks(playlistId.value, fromIndex, toIndex);
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
   isDragging.value = false;
   draggedIndex.value = null;
@@ -170,7 +156,7 @@ function startEditDescription() { isEditingDescription.value = true; }
 async function saveDescription() {
   if (playlistId.value) playlistStore.updatePlaylistDescription(playlistId.value, descriptionText.value);
   isEditingDescription.value = false;
-  await persistLibrary();
+  await libraryStore.persistLibrary();
 }
 
 function cancelEditDescription() {
@@ -192,12 +178,12 @@ function playTrack(trackId: string) {
 
 async function toggleFavorite(track: AudioTrack) {
   playlistStore.toggleFavorite(track);
-  await persistLibrary();
+  await libraryStore.persistLibrary();
 }
 
 async function removeTrack(trackId: string) {
   if (playlistId.value) playlistStore.removeFromPlaylist(playlistId.value, trackId);
-  await persistLibrary();
+  await libraryStore.persistLibrary();
 }
 </script>
 

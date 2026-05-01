@@ -20,26 +20,12 @@ import { usePlaylistStore } from '@/stores/playlistStore';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { getCoverUrl } from '@/utils/coverUrl';
 import { formatTime, getFolderName, getFolderPath } from '@/utils/format';
-import { saveLibraryToBackend } from '@/services/persistence/libraryPersistence';
 import type { AudioTrack } from '@/types';
 
 const router = useRouter();
 const libraryStore = useLibraryStore();
 const playlistStore = usePlaylistStore();
 const playbackStore = usePlaybackStore();
-
-async function persistLibrary() {
-  try {
-    await saveLibraryToBackend(
-      libraryStore.libraryFolders,
-      playlistStore.playlists,
-      libraryStore.libraryTracks,
-      libraryStore.scanDepth
-    );
-  } catch (error) {
-    console.error('[LocalPage] Failed to persist library:', error);
-  }
-}
 
 const emit = defineEmits<{
   (e: 'add-to-playlist'): void;
@@ -494,7 +480,7 @@ function deselectAllFiles() {
                 <button
                   class="md3-icon-btn-xs state-layer"
                   :class="{ 'text-red-400': isTrackFavorite(track.path) }"
-                  @click.stop="async () => { playlistStore.toggleFavorite(track); await persistLibrary(); }"
+                  @click.stop="async () => { playlistStore.toggleFavorite(track); await libraryStore.persistLibrary(); }"
                   title="收藏"
                 >
                   <Heart :size="16" :fill="isTrackFavorite(track.path) ? 'currentColor' : 'none'" />

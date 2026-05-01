@@ -210,21 +210,23 @@ function onWheel(e: WheelEvent) {
         </button>
 
         <div v-if="currentTrack" class="drawer-content">
-          <div class="flex flex-col items-center justify-center" style="flex: 0 0 40%; max-width: 40%; padding: 0 2% 0 8%; box-sizing: border-box;">
-            <div class="w-full" style="max-height: 70vh;">
-              <div class="aspect-square rounded-2xl overflow-hidden shadow-2xl mb-8" style="max-height: 100%; width: auto; margin: 0 auto;">
-                <img
-                  v-if="currentTrack.coverUrl"
-                  :src="getCoverUrl(currentTrack.coverUrl)"
-                  alt="专辑封面"
-                  class="w-full h-full object-cover"
-                />
-                <div v-else class="w-full h-full bg-[var(--bg-surface)] flex items-center justify-center">
-                  <Music :size="120" class="text-[var(--text-tertiary)]" />
+          <div class="left-column">
+            <div class="left-content">
+              <div class="cover-wrapper">
+                <div class="cover-container">
+                  <img
+                    v-if="currentTrack.coverUrl"
+                    :src="getCoverUrl(currentTrack.coverUrl)"
+                    alt="专辑封面"
+                    class="cover-image"
+                  />
+                  <div v-else class="cover-image cover-placeholder">
+                    <Music :size="120" class="text-[var(--text-tertiary)]" />
+                  </div>
                 </div>
               </div>
 
-              <div class="text-center">
+              <div class="track-info">
                 <h1 class="text-3xl font-bold text-[var(--text-primary)] mt-2 mb-2 line-clamp-2">{{ currentTrack.title }}</h1>
                 <p class="text-lg text-[var(--text-tertiary)] mb-1 line-clamp-1">{{ currentTrack.artist }}</p>
                 <p v-if="currentTrack.album" class="text-base text-[var(--text-disabled)] line-clamp-2">{{ currentTrack.album }}</p>
@@ -360,5 +362,61 @@ function onWheel(e: WheelEvent) {
 
 .drawer-empty {
   align-items: center;
+}
+
+.left-column {
+  flex: 0 0 40%;
+  max-width: 40%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2% 0 2% 8%;
+  box-sizing: border-box;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.left-content {
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.cover-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.cover-container {
+  aspect-ratio: 1;
+  max-width: 100%;
+  max-height: 55vh;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+
+.cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-placeholder {
+  background: var(--bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.track-info {
+  flex-shrink: 0;
+  text-align: center;
+  padding-top: 16px;
+  padding-bottom: 8px;
+  width: 100%;
 }
 </style>

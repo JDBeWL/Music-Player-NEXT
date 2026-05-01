@@ -2,7 +2,6 @@ import { computed } from 'vue';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { useLibraryStore } from '@/stores/libraryStore';
-import { saveLibraryToBackend } from '@/services/persistence/libraryPersistence';
 import type { AudioTrack, RepeatMode } from '@/types';
 
 export function usePlayerControls() {
@@ -71,29 +70,16 @@ export function usePlayerControls() {
   async function toggleFavorite() {
     if (!playbackStore.currentTrack) return;
     playlistStore.toggleFavorite(playbackStore.currentTrack);
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
 
   async function toggleTrackFavorite(track: AudioTrack) {
     playlistStore.toggleFavorite(track);
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
 
   function playSearchAsNext(track: AudioTrack) {
     playbackStore.insertAndPlayNext(track);
-  }
-
-  async function persistLibrary() {
-    try {
-      await saveLibraryToBackend(
-        libraryStore.libraryFolders,
-        playlistStore.playlists,
-        libraryStore.libraryTracks,
-        libraryStore.scanDepth
-      );
-    } catch (error) {
-      console.error('[usePlayerControls] Failed to persist library:', error);
-    }
   }
 
   return {

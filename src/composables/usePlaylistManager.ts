@@ -2,7 +2,6 @@ import { ref } from 'vue';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { useLibraryStore } from '@/stores/libraryStore';
-import { saveLibraryToBackend } from '@/services/persistence/libraryPersistence';
 
 export function usePlaylistManager() {
   const playlistStore = usePlaylistStore();
@@ -21,7 +20,7 @@ export function usePlaylistManager() {
   async function handleCreatePlaylist(name: string) {
     playlistStore.createPlaylist(name);
     showCreatePrompt.value = false;
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
 
   function playPlaylist(id: string) {
@@ -43,21 +42,21 @@ export function usePlaylistManager() {
     const currentPlaylistId = playlistStore.currentPlaylistId;
     if (!currentPlaylistId) return;
     playlistStore.updatePlaylistDescription(currentPlaylistId, description);
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
 
   async function removeTrackFromPlaylist(trackId: string) {
     const currentPlaylistId = playlistStore.currentPlaylistId;
     if (!currentPlaylistId) return;
     playlistStore.removeFromPlaylist(currentPlaylistId, trackId);
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
 
   async function reorderTracksInPlaylist(fromIndex: number, toIndex: number) {
     const currentPlaylistId = playlistStore.currentPlaylistId;
     if (!currentPlaylistId) return;
     playlistStore.reorderPlaylistTracks(currentPlaylistId, fromIndex, toIndex);
-    await persistLibrary();
+    await libraryStore.persistLibrary();
   }
 
   function requestDeletePlaylist(playlistId: string) {
@@ -75,7 +74,7 @@ export function usePlaylistManager() {
         closePlaylistDetail();
       }
       playlistStore.deletePlaylist(playlistIdToDelete);
-      await persistLibrary();
+      await libraryStore.persistLibrary();
     }
   }
 
@@ -93,20 +92,7 @@ export function usePlaylistManager() {
     libraryStore.deselectAllFiles();
     libraryStore.isLocalBrowserOpen = false;
     showPlaylistDialog.value = false;
-    await persistLibrary();
-  }
-
-  async function persistLibrary() {
-    try {
-      await saveLibraryToBackend(
-        libraryStore.libraryFolders,
-        playlistStore.playlists,
-        libraryStore.libraryTracks,
-        libraryStore.scanDepth
-      );
-    } catch (error) {
-      console.error('[usePlaylistManager] Failed to persist library:', error);
-    }
+    await libraryStore.persistLibrary();
   }
 
   return {
