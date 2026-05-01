@@ -4,6 +4,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type { AudioTrack, PlaybackState, RepeatMode } from '@/types';
 import { needsFFmpegConversion } from '@/types';
 import { unifiedAudioPlayer } from '@/services/audio/UnifiedAudioPlayer';
+import { settingsSync } from '@/services/settingsSync';
 
 export const usePlaybackStore = defineStore('playback', () => {
   const currentTrack = ref<AudioTrack | null>(null);
@@ -314,34 +315,8 @@ export const usePlaybackStore = defineStore('playback', () => {
     saveVolumeSettings(clampedValue);
   }
 
-  let _settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  let _pendingSettings: Record<string, unknown> = {};
-
-  function flushSettings() {
-    if (_settingsSaveTimer !== null) {
-      clearTimeout(_settingsSaveTimer);
-      _settingsSaveTimer = null;
-    }
-    if (Object.keys(_pendingSettings).length === 0) return;
-
-    const partial = { ..._pendingSettings };
-    _pendingSettings = {};
-
-    invoke('update_settings', { partial }).catch((error) => {
-      console.error('[PlaybackStore] Failed to update settings:', error);
-    });
-  }
-
-  function scheduleSettingsUpdate(updates: Record<string, unknown>) {
-    Object.assign(_pendingSettings, updates);
-    if (_settingsSaveTimer !== null) {
-      clearTimeout(_settingsSaveTimer);
-    }
-    _settingsSaveTimer = setTimeout(flushSettings, 300);
-  }
-
   async function saveVolumeSettings(vol: number) {
-    scheduleSettingsUpdate({ volume: vol });
+    settingsSync.schedule({ volume: vol });
   }
 
   async function loadVolumeSettings() {
@@ -367,7 +342,7 @@ export const usePlaybackStore = defineStore('playback', () => {
   }
 
   async function savePlaybackModeSettings() {
-    scheduleSettingsUpdate({
+    settingsSync.schedule({
       repeat_mode: repeatMode.value,
       shuffle: isShuffle.value
     });
@@ -461,14 +436,15 @@ export const usePlaybackStore = defineStore('playback', () => {
   function addSelectedToQueue(selectedTracks: AudioTrack[]) {
     if (selectedTracks.length === 0) return;
 
-    selectedTracks.forEach(track => {
+    const baseId = Date.now();
+    selectedTracks.forEach((track, index) => {
       const existingIndex = queue.value.findIndex(t => t.path === track.path);
       if (existingIndex !== -1) {
         queue.value.splice(existingIndex, 1);
       }
       queue.value.push({
         ...track,
-        id: `track_${Date.now()}_${Math.random()}`
+        id: `track_${baseId}_${index}`
       });
     });
 

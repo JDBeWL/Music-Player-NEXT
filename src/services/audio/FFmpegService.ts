@@ -123,10 +123,11 @@ class FFmpegAudioService {
     return new Promise<Uint8Array>((resolve, reject) => {
       this.conversionPromises.set(trackId, { resolve, reject });
 
+      const clonedData = audioData.slice();
       this.worker!.postMessage({
         type: 'convert',
-        data: { audioData, extension, trackId }
-      }, [audioData.buffer]);
+        data: { audioData: clonedData, extension, trackId }
+      }, [clonedData.buffer]);
     });
   }
 
@@ -409,7 +410,7 @@ class FFmpegAudioService {
       this.progressListeners.forEach(cb => {
         cb(this.getCurrentTime(), this.getDuration());
       });
-    }, 250);
+    }, 100);
   }
 
   private stopProgressTracking(): void {

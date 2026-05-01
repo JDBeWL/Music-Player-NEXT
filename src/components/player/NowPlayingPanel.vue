@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ChevronDown, Music } from 'lucide-vue-next';
-import LyricsDisplay from './LyricsDisplay.vue';
+import LyricsDisplay from '@/components/player/LyricsDisplay.vue';
 import { getCoverUrl } from '@/utils/coverUrl';
 
 interface Track {
@@ -29,18 +29,25 @@ const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
 const playerBarHeight = ref(96);
+let resizeObserver: ResizeObserver | null = null;
 
 onMounted(() => {
   const playerBar = document.querySelector('footer');
   if (playerBar) {
     playerBarHeight.value = playerBar.getBoundingClientRect().height;
-    const observer = new ResizeObserver((entries) => {
+    resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         playerBarHeight.value = entry.contentRect.height;
       }
     });
-    observer.observe(playerBar);
-    onUnmounted(() => observer.disconnect());
+    resizeObserver.observe(playerBar);
+  }
+});
+
+onUnmounted(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
   }
 });
 

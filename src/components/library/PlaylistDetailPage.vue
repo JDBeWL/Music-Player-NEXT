@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { Play, Edit, Music, Heart, Trash2, ArrowUpDown, ArrowUp, ArrowDown, GripVertical } from 'lucide-vue-next';
+import { Play, Edit, Music, Heart, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
 import { formatTime } from '@/utils/format';
 import { usePlaybackStore } from '@/stores/playbackStore';
@@ -31,9 +31,13 @@ const sortOrder = ref<SortOrder>('asc');
 const draggedIndex = ref<number | null>(null);
 const dragOverIndex = ref<number | null>(null);
 const isDragging = ref(false);
+const isLongPressing = ref(false);
 const dragStartY = ref(0);
-const DRAG_THRESHOLD = 20;
+const LONG_PRESS_DURATION = 300;
 const draggedTrackId = ref<string | null>(null);
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let lastClickTime = 0;
+let lastClickTrackId: string | null = null;
 
 const sortOptions: { key: SortKey; label: string }[] = [
   { key: 'default', label: '默认排序' },
@@ -100,19 +104,51 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', handleMouseUp);
 });
 
-function handleGripMouseDown(e: MouseEvent, index: number) {
+function handleTrackMouseDown(e: MouseEvent, index: number) {
   if (sortKey.value !== 'default') return;
+  if (e.button !== 0) return;
   e.preventDefault();
-  e.stopPropagation();
-  isDragging.value = true;
-  draggedIndex.value = index;
-  draggedTrackId.value = playlist.value?.tracks[index]?.id || null;
+
+  const trackId = playlist.value?.tracks[index]?.id;
+  const now = Date.now();
+  if (trackId && trackId === lastClickTrackId && now - lastClickTime < 400) {
+    lastClickTime = 0;
+    lastClickTrackId = null;
+    playTrack(trackId);
+    return;
+  }
+  lastClickTime = now;
+  lastClickTrackId = trackId || null;
+
   dragStartY.value = e.clientY;
+  isLongPressing.value = true;
+  draggedTrackId.value = trackId || null;
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null;
+    isDragging.value = true;
+    draggedIndex.value = index;
+  }, LONG_PRESS_DURATION);
+}
+
+function cancelLongPress() {
+  if (longPressTimer !== null) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  isLongPressing.value = false;
+  draggedTrackId.value = null;
 }
 
 function handleMouseMove(e: MouseEvent) {
+  if (isLongPressing.value && !isDragging.value) {
+    if (Math.abs(e.clientY - dragStartY.value) > 10) {
+      cancelLongPress();
+    }
+    return;
+  }
   if (!isDragging.value || draggedIndex.value === null) return;
-  const trackElements = document.querySelectorAll('.track-item');
+  if (!trackListRef.value) return;
+  const trackElements = trackListRef.value.querySelectorAll('.track-item');
   let closestIndex = -1;
   let minDistance = Infinity;
   trackElements.forEach((el, i) => {
@@ -124,16 +160,22 @@ function handleMouseMove(e: MouseEvent) {
   if (closestIndex !== -1) dragOverIndex.value = closestIndex;
 }
 
-async function handleMouseUp(e: MouseEvent) {
-  if (!isDragging.value) return;
-  const dragDistance = Math.abs(e.clientY - dragStartY.value);
-  const fromIndex = draggedIndex.value;
-  const toIndex = dragOverIndex.value;
-  if (dragDistance >= DRAG_THRESHOLD && fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
-    if (playlistId.value) playlistStore.reorderPlaylistTracks(playlistId.value, fromIndex, toIndex);
-    await libraryStore.persistLibrary();
+async function handleMouseUp() {
+  if (!isDragging.value && !isLongPressing.value) return;
+  if (isDragging.value) {
+    const fromIndex = draggedIndex.value;
+    const toIndex = dragOverIndex.value;
+    if (fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
+      if (playlistId.value) playlistStore.reorderPlaylistTracks(playlistId.value, fromIndex, toIndex);
+      await libraryStore.persistLibrary();
+    }
+  }
+  if (longPressTimer !== null) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
   }
   isDragging.value = false;
+  isLongPressing.value = false;
   draggedIndex.value = null;
   dragOverIndex.value = null;
   draggedTrackId.value = null;
@@ -146,6 +188,8 @@ const playlistCover = computed(() => {
   if (pl.tracks.length > 0 && pl.tracks[0].coverUrl) return getCoverUrl(pl.tracks[0].coverUrl);
   return undefined;
 });
+
+const trackListRef = ref<HTMLElement | null>(null);
 
 watch(() => playlist.value?.description, (newDesc) => {
   descriptionText.value = newDesc || '';
@@ -270,16 +314,19 @@ async function removeTrack(trackId: string) {
             <p class="text-sm text-[var(--text-tertiary)]">添加一些歌曲来填充这个列表</p>
           </div>
 
-          <div v-else class="space-y-2">
+          <div v-else ref="trackListRef" class="space-y-2">
             <div
               v-for="(track, trackIndex) in sortedTracks"
               :key="track.id"
-              class="track-item flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-150 group no-select relative state-layer cursor-pointer"
+              class="track-item flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-150 group no-select relative state-layer"
               :class="[
                 isDragging && track.id === draggedTrackId ? 'opacity-50 scale-[0.98] elevation-2 z-10' : '',
-                !isDragging && track.id === currentTrackId ? 'bg-[var(--color-primary-container)]' : ''
+                !isDragging && track.id === currentTrackId ? 'bg-[var(--color-primary-container)]' : '',
+                isLongPressing && !isDragging && track.id === draggedTrackId ? 'scale-[0.98] opacity-80' : '',
+                isDragging ? 'cursor-grabbing' : sortKey === 'default' ? 'cursor-grab' : 'cursor-pointer'
               ]"
-              @dblclick="!isDragging && playTrack(track.id)"
+              @mousedown="handleTrackMouseDown($event, trackIndex)"
+              @dragstart.prevent
             >
               <div class="w-8 h-8 flex items-center justify-center">
                 <span v-if="track.id !== currentTrackId || !isPlaying" class="text-[var(--text-tertiary)] font-medium">{{ trackIndex + 1 }}</span>
@@ -289,13 +336,6 @@ async function removeTrack(trackId: string) {
                   <div class="w-0.5 h-3 bg-[var(--color-primary)] animate-pulse" style="animation-delay: 0.2s"></div>
                 </div>
               </div>
-              <GripVertical
-                v-if="sortKey === 'default'"
-                :size="16"
-                class="text-[var(--text-disabled)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
-                @mousedown.stop.prevent="handleGripMouseDown($event, trackIndex)"
-              />
-              <div v-else class="w-4 flex-shrink-0"></div>
               <div class="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 bg-[var(--bg-tertiary)]">
                 <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="封面" class="w-full h-full object-cover" />
                 <div v-else class="w-full h-full flex items-center justify-center">

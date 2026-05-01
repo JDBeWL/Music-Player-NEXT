@@ -4,14 +4,14 @@ import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'radix-vue';
 import { Folder, Trash2, Plus, Loader2, Trash, Music, Sliders, Info, Keyboard, FolderSearch, Database, Palette, X, Cloud, Check } from 'lucide-vue-next';
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/stores/configStore';
-import { useNeteaseStore } from '@/stores/neteaseStore';
+import { useNeteaseSearchStore } from '@/stores/neteaseSearchStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { LyricsParser } from '@/utils/lyricsParser';
 import { getFolderName } from '@/utils/format';
 
 const configStore = useConfigStore();
-const neteaseStore = useNeteaseStore();
+const neteaseSearchStore = useNeteaseSearchStore();
 const libraryStore = useLibraryStore();
 const playlistStore = usePlaylistStore();
 
@@ -359,8 +359,8 @@ onMounted(() => {
   window.addEventListener('click', cancelRecording);
 
   // 初始化API Enhanced 地址输入框
-  if (neteaseStore.apiBaseUrl) {
-    neteaseApiInput.value = neteaseStore.apiBaseUrl;
+  if (neteaseSearchStore.apiBaseUrl) {
+    neteaseApiInput.value = neteaseSearchStore.apiBaseUrl;
   }
 
   loadCacheInfo();
@@ -445,8 +445,8 @@ async function saveNeteaseApiBase() {
   isSavingApiBase.value = true;
   apiSaveSuccess.value = false;
   try {
-    await neteaseStore.updateApiBase(url);
-    neteaseApiInput.value = neteaseStore.apiBaseUrl;
+    await neteaseSearchStore.updateApiBase(url);
+    neteaseApiInput.value = neteaseSearchStore.apiBaseUrl;
     apiSaveSuccess.value = true;
     setTimeout(() => { apiSaveSuccess.value = false; }, 2000);
   } catch (error) {
@@ -652,7 +652,7 @@ invoke<string>('get_library_path_info').then(path => {
                 </button>
               </div>
               <div class="text-xs text-[var(--text-disabled)] mt-2">
-                当前地址: {{ neteaseStore.apiBaseUrl || '未配置（使用默认地址）' }}
+                当前地址: {{ neteaseSearchStore.apiBaseUrl || '未配置（使用默认地址）' }}
               </div>
             </div>
 

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { settingsSync } from '@/services/settingsSync';
 
 export const useConfigStore = defineStore('config', () => {
   const lyricsDisplayMode = ref<'modern' | 'classic'>('modern');
@@ -37,45 +38,6 @@ export const useConfigStore = defineStore('config', () => {
     close_behavior?: string;
     persist_playback?: boolean;
     netease_real_ip?: string;
-  }
-
-  let _saveTimer: ReturnType<typeof setTimeout> | null = null;
-  let _pendingPartial: Record<string, unknown> = {};
-
-  function flushPendingSettings() {
-    if (_saveTimer !== null) {
-      clearTimeout(_saveTimer);
-      _saveTimer = null;
-    }
-    if (Object.keys(_pendingPartial).length === 0) return;
-
-    const partial = { ..._pendingPartial };
-    _pendingPartial = {};
-
-    invoke('update_settings', { partial }).catch((error) => {
-      console.error('Failed to update settings:', error);
-      try {
-        const config = {
-          lyricsDisplayMode: lyricsDisplayMode.value,
-          showTranslation: showTranslation.value,
-          enableLyricsBlur: enableLyricsBlur.value,
-          themeMode: themeMode.value,
-          keyboardShortcuts: keyboardShortcuts.value,
-          neteaseRealIP: neteaseRealIP.value
-        };
-        localStorage.setItem('mpnext-config', JSON.stringify(config));
-      } catch (e) {
-        console.error('Failed to save config to localStorage:', e);
-      }
-    });
-  }
-
-  function scheduleSave(updates: Record<string, unknown>) {
-    Object.assign(_pendingPartial, updates);
-    if (_saveTimer !== null) {
-      clearTimeout(_saveTimer);
-    }
-    _saveTimer = setTimeout(flushPendingSettings, 300);
   }
 
   async function loadConfig() {
@@ -116,7 +78,7 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   async function saveConfig() {
-    scheduleSave({
+    settingsSync.schedule({
       lyrics_display_mode: lyricsDisplayMode.value,
       show_translation: showTranslation.value,
       enable_lyrics_blur: enableLyricsBlur.value,

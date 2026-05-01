@@ -4,7 +4,8 @@ import { usePlaybackStore } from '@/stores/playbackStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { useConfigStore } from '@/stores/configStore';
-import { useNeteaseStore } from '@/stores/neteaseStore';
+import { useNeteaseAuthStore } from '@/stores/neteaseAuthStore';
+import { useNeteaseSearchStore } from '@/stores/neteaseSearchStore';
 import { usePlayerControls } from '@/composables/usePlayerControls';
 import type { Ref } from 'vue';
 
@@ -13,7 +14,8 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
   const libraryStore = useLibraryStore();
   const playlistStore = usePlaylistStore();
   const configStore = useConfigStore();
-  const neteaseStore = useNeteaseStore();
+  const neteaseAuthStore = useNeteaseAuthStore();
+  const neteaseSearchStore = useNeteaseSearchStore();
   const { handlePlayNext } = usePlayerControls();
 
   function handleSavePlaybackBeforeClose() {
@@ -28,7 +30,8 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
 
     await configStore.loadConfig();
 
-    neteaseStore.init();
+    neteaseAuthStore.init();
+    neteaseSearchStore.init();
 
     const [loadedPlaylists] = await Promise.all([
       libraryStore.loadLibrary(),

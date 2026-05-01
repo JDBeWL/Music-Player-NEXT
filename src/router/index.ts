@@ -9,27 +9,27 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/player',
     name: 'player',
-    component: () => import('@/components/PlayerPage.vue'),
+    component: () => import('@/components/player/PlayerPage.vue'),
   },
   {
     path: '/local',
     name: 'local',
-    component: () => import('@/components/LocalPage.vue'),
+    component: () => import('@/components/library/LocalPage.vue'),
   },
   {
     path: '/settings',
     name: 'settings',
-    component: () => import('@/components/SettingsPage.vue'),
+    component: () => import('@/components/settings/SettingsPage.vue'),
   },
   {
     path: '/netease',
     name: 'netease',
-    component: () => import('@/components/NeteasePage.vue'),
+    component: () => import('@/components/netease/NeteasePage.vue'),
   },
   {
     path: '/playlist/:id',
     name: 'playlist-detail',
-    component: () => import('@/components/PlaylistDetailPage.vue'),
+    component: () => import('@/components/library/PlaylistDetailPage.vue'),
     props: true,
   },
 ];

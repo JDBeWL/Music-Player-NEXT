@@ -18,16 +18,35 @@ export default defineConfig(async () => ({
 
   build: {
     target: "esnext",
+    minify: "esbuild",
+    cssMinify: true,
     rollupOptions: {
       output: {
         manualChunks: (id) => {
           if (id.includes('node_modules')) {
             if (/vue|vue-router|pinia/.test(id)) return 'vue';
             if (/@ffmpeg/.test(id)) return 'ffmpeg';
+            if (/@material\/material-color-utilities/.test(id)) return 'material';
+            if (/lucide-vue-next/.test(id)) return 'icons';
+            if (/@vueuse/.test(id)) return 'vueuse';
+            if (/radix-vue/.test(id)) return 'radix';
+            if (/@tauri-apps/.test(id)) return 'tauri';
+            return 'vendor';
           }
+        },
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: (assetInfo) => {
+          const info = assetInfo.name || '';
+          if (info.endsWith('.css')) return 'assets/[name]-[hash][extname]';
+          if (/\.(png|jpe?g|gif|svg|webp|ico)$/.test(info)) return 'assets/images/[name]-[hash][extname]';
+          if (/\.(woff2?|ttf|otf|eot)$/.test(info)) return 'assets/fonts/[name]-[hash][extname]';
+          return 'assets/[name]-[hash][extname]';
         },
       },
     },
+    sourcemap: false,
+    reportCompressedSize: false,
   },
 
   clearScreen: false,

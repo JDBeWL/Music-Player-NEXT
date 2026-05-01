@@ -6,6 +6,14 @@ import type { LyricLine, LyricsFormat, KaraokeWord } from '@/types'
 // 让出主线程的辅助函数
 const yieldToMain = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 
+// 预编译正则表达式，避免重复编译
+const LRC_TIME_REGEX = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g
+const LRC_LINE_REGEX = /^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\](.*)$/
+const SRT_TIME_REGEX = /(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/
+const ASS_TIME_REGEX = /^(\d+):(\d{2}):(\d{2})\.(\d{2})$/
+const ASS_KARAOKE_TAG = /\{\\k[f]?(\d+)\}([^{}]*)/g
+const ASS_CLEAN_TAG = /\{.*?\}/g
+
 export class LyricsParser {
   /**
    * 解析歌词文件（同步版本，用于简单场景）
@@ -72,7 +80,6 @@ export class LyricsParser {
    */
   static async parseLRCAsync(content: string): Promise<LyricLine[]> {
     const lines = content.split("\n")
-    const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g
     const resultMap: Record<number, LyricLine> = {}
     const CHUNK_SIZE = 100
 
@@ -82,20 +89,19 @@ export class LyricsParser {
       }
 
       const line = lines[i]
-      const linePattern = new RegExp(pattern)
       const timestamps: Array<{ time: number; index: number }> = []
       let match: RegExpExecArray | null
-      while ((match = linePattern.exec(line)) !== null) {
-        let time: number
-        if (match[1] !== undefined) {
-          time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / 100
-        } else {
-          time = parseInt(match[4]) * 60 + parseInt(match[5]) + parseInt(match[6].padEnd(3, "0")) / 1000
-        }
+      LRC_TIME_REGEX.lastIndex = 0
+      while ((match = LRC_TIME_REGEX.exec(line)) !== null) {
+        const minutes = parseInt(match[1])
+        const seconds = parseInt(match[2])
+        const msStr = match[3] || '0'
+        const milliseconds = parseInt(msStr.padEnd(3, '0').substring(0, 3))
+        const time = minutes * 60 + seconds + milliseconds / 1000
         timestamps.push({ time, index: match.index })
       }
       if (timestamps.length < 1) continue
-      const text = line.replace(linePattern, "").trim()
+      const text = line.replace(LRC_TIME_REGEX, "").trim()
       if (!text) continue
       const startTime = timestamps[0].time
       resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }
@@ -185,11 +191,11 @@ export class LyricsParser {
     const result: LyricLine[] = []
     groupedMap.forEach(group => {
       const parseKaraoke = (text: string): KaraokeWord[] => {
-        const karaokeTag = /{\\k[f]?(\d+)}([^{}]*)/g
         const words: KaraokeWord[] = []
         let accTime = group.startTime
         let match: RegExpExecArray | null
-        while ((match = karaokeTag.exec(text)) !== null) {
+        ASS_KARAOKE_TAG.lastIndex = 0
+        while ((match = ASS_KARAOKE_TAG.exec(text)) !== null) {
           const duration = parseInt(match[1]) * 0.01
           words.push({ text: match[2], start: accTime, end: accTime + duration })
           accTime += duration
@@ -199,7 +205,7 @@ export class LyricsParser {
       const enWords = parseKaraoke(group.texts.orig)
       result.push({
         time: group.startTime,
-        texts: [group.texts.orig.replace(/{.*?}/g, ''), group.texts.ts.replace(/{.*?}/g, '')],
+        texts: [group.texts.orig.replace(ASS_CLEAN_TAG, ''), group.texts.ts.replace(ASS_CLEAN_TAG, '')],
         words: enWords,
         karaoke: enWords.length > 0 ? { fullText: group.texts.orig, timings: [] } : null
       })
@@ -213,14 +219,14 @@ export class LyricsParser {
   static parseLRC(content: string): LyricLine[] {
     const lines = content.split('\n')
     const lyrics: LyricLine[] = []
-    const timeRegex = /^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\](.*)$/
 
     for (const line of lines) {
       const trimmedLine = line.trim()
       if (!trimmedLine) continue
 
-      const timeMatches = [...trimmedLine.matchAll(/\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g)]
-      const textPart = trimmedLine.replace(/\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g, '').trim()
+      LRC_TIME_REGEX.lastIndex = 0
+      const timeMatches = [...trimmedLine.matchAll(LRC_TIME_REGEX)]
+      const textPart = trimmedLine.replace(LRC_TIME_REGEX, '').trim()
 
       if (timeMatches.length > 0 && textPart) {
         for (const match of timeMatches) {
@@ -231,7 +237,8 @@ export class LyricsParser {
           lyrics.push({ time, text: textPart })
         }
       } else {
-        const singleMatch = trimmedLine.match(timeRegex)
+        LRC_LINE_REGEX.lastIndex = 0
+        const singleMatch = LRC_LINE_REGEX.exec(trimmedLine)
         if (singleMatch) {
           const minutes = parseInt(singleMatch[1])
           const seconds = parseInt(singleMatch[2])
@@ -285,7 +292,7 @@ export class LyricsParser {
 
           if (startIndex !== -1 && textIndex !== -1) {
             const startTime = this.parseASSTime(parts[startIndex])
-            const text = parts.slice(textIndex).join(',').replace(/{[^}]*}/g, '').trim()
+            const text = parts.slice(textIndex).join(',').replace(ASS_CLEAN_TAG, '').trim()
 
             if (text && startTime !== null) {
               lyrics.push({ time: startTime, text })
@@ -305,13 +312,12 @@ export class LyricsParser {
   static parseSRT(content: string): LyricLine[] {
     const blocks = content.trim().split(/\n\s*\n/)
     const lyrics: LyricLine[] = []
-    const timeRegex = /(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/
 
     for (const block of blocks) {
       const lines = block.trim().split('\n')
       if (lines.length < 2) continue
 
-      const timeMatch = lines[1].match(timeRegex)
+      const timeMatch = lines[1].match(SRT_TIME_REGEX)
       if (!timeMatch) continue
 
       const startTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 +
@@ -331,7 +337,8 @@ export class LyricsParser {
    * 解析 ASS 时间格式
    */
   static parseASSTime(timeStr: string): number | null {
-    const match = timeStr.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/)
+    ASS_TIME_REGEX.lastIndex = 0
+    const match = ASS_TIME_REGEX.exec(timeStr)
     if (match) {
       return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 +
         parseInt(match[3]) + parseInt(match[4]) / 100

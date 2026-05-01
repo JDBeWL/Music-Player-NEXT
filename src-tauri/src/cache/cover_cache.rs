@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock, RwLock};
+use tauri::State;
+use crate::domain::app_state::AppState;
 
 const MAX_COVER_CACHE_SIZE: usize = 5000;
 
@@ -143,7 +144,7 @@ fn compute_hash(data: &[u8]) -> u64 {
 
 impl CoverCache {
     pub fn new() -> std::io::Result<Self> {
-        let cache_root = crate::get_data_dir().join("covers");
+        let cache_root = crate::domain::utils::get_data_dir().join("covers");
         let dir = cache_root.join("full");
         let thumb_dir = cache_root.join("thumb");
         let index_path = cache_root.join("index.json");
@@ -480,8 +481,8 @@ pub fn compute_cover_hash(data: &[u8]) -> u64 {
 }
 
 #[tauri::command]
-pub fn get_cover_entry(cover_id: String) -> Result<Option<CoverCacheEntry>, String> {
-    if let Ok(ref mut cache) = get_cover_cache().write() {
+pub fn get_cover_entry(cover_id: String, state: State<'_, AppState>) -> Result<Option<CoverCacheEntry>, String> {
+    if let Ok(ref mut cache) = state.cover_cache.write() {
         Ok(cache.get(&cover_id))
     } else {
         Ok(None)
@@ -489,8 +490,8 @@ pub fn get_cover_entry(cover_id: String) -> Result<Option<CoverCacheEntry>, Stri
 }
 
 #[tauri::command]
-pub fn save_cover_to_cache_cmd(cover_id: String, cover_data: Vec<u8>) -> Result<CoverCacheEntry, String> {
-    if let Ok(ref mut cache) = get_cover_cache().write() {
+pub fn save_cover_to_cache_cmd(cover_id: String, cover_data: Vec<u8>, state: State<'_, AppState>) -> Result<CoverCacheEntry, String> {
+    if let Ok(ref mut cache) = state.cover_cache.write() {
         cache.put(cover_id, &cover_data).map_err(|e| e.to_string())
     } else {
         Err("Cache lock failed".to_string())
@@ -498,7 +499,7 @@ pub fn save_cover_to_cache_cmd(cover_id: String, cover_data: Vec<u8>) -> Result<
 }
 
 #[tauri::command]
-pub fn extract_and_cache_cover(audio_path: String) -> Result<Option<CoverCacheEntry>, String> {
+pub fn extract_and_cache_cover(audio_path: String, state: State<'_, AppState>) -> Result<Option<CoverCacheEntry>, String> {
     let data = extract_cover_from_path(&audio_path)
         .map_err(|e| e.to_string())?;
 
@@ -508,14 +509,14 @@ pub fn extract_and_cache_cover(audio_path: String) -> Result<Option<CoverCacheEn
 
     let hash = compute_cover_hash(&data);
 
-    if let Ok(ref cache) = get_cover_cache().read() {
+    if let Ok(ref cache) = state.cover_cache.read() {
         if let Some((_, entry)) = cache.find_by_hash(hash) {
             return Ok(Some(entry));
         }
     }
 
     let cover_id = format!("cover_{}", uuid_simple());
-    if let Ok(ref mut cache) = get_cover_cache().write() {
+    if let Ok(ref mut cache) = state.cover_cache.write() {
         let entry = cache.put(cover_id, &data).map_err(|e| e.to_string())?;
         Ok(Some(entry))
     } else {
@@ -524,7 +525,7 @@ pub fn extract_and_cache_cover(audio_path: String) -> Result<Option<CoverCacheEn
 }
 
 #[tauri::command]
-pub fn extract_and_cache_covers_batch(audio_paths: Vec<String>) -> Result<Vec<(String, Option<CoverCacheEntry>)>, String> {
+pub fn extract_and_cache_covers_batch(audio_paths: Vec<String>, state: State<'_, AppState>) -> Result<Vec<(String, Option<CoverCacheEntry>)>, String> {
     use rayon::prelude::*;
 
     let extracted: Vec<(String, Option<Vec<u8>>, u64)> = audio_paths
@@ -538,7 +539,7 @@ pub fn extract_and_cache_covers_batch(audio_paths: Vec<String>) -> Result<Vec<(S
 
     let mut hash_to_existing: HashMap<u64, CoverCacheEntry> = HashMap::new();
 
-    if let Ok(ref cache) = get_cover_cache().read() {
+    if let Ok(ref cache) = state.cover_cache.read() {
         for (_, _, hash) in &extracted {
             if *hash != 0 && !hash_to_existing.contains_key(hash) {
                 if let Some((_, entry)) = cache.find_by_hash(*hash) {
@@ -567,7 +568,7 @@ pub fn extract_and_cache_covers_batch(audio_paths: Vec<String>) -> Result<Vec<(S
     }
 
     if !to_cache.is_empty() {
-        if let Ok(ref mut cache) = get_cover_cache().write() {
+        if let Ok(ref mut cache) = state.cover_cache.write() {
             let cache_inputs: Vec<(String, Vec<u8>)> = to_cache.iter().map(|(id, data, _, _)| (id.clone(), data.clone())).collect();
             let _cached = cache.put_batch(cache_inputs);
 
@@ -585,15 +586,12 @@ pub fn extract_and_cache_covers_batch(audio_paths: Vec<String>) -> Result<Vec<(S
 }
 
 #[tauri::command]
-pub fn get_cover_cache_info() -> Result<(String, usize), String> {
-    if let Ok(ref cache) = get_cover_cache().read() {
-        // Count actual files on disk to give accurate count,
-        // since in-memory index may be out of sync after restart with new UUIDs
+pub fn get_cover_cache_info(state: State<'_, AppState>) -> Result<(String, usize), String> {
+    if let Ok(ref cache) = state.cover_cache.read() {
         let disk_count = fs::read_dir(&cache.dir)
             .map(|entries| entries.filter_map(|e| e.ok()).filter(|e| e.path().is_file()).count())
             .unwrap_or(0);
         let count = if cache.index.is_empty() && disk_count > 0 {
-            // Index is empty but files exist on disk - show disk count
             disk_count
         } else {
             cache.index.len()
@@ -606,8 +604,8 @@ pub fn get_cover_cache_info() -> Result<(String, usize), String> {
 }
 
 #[tauri::command]
-pub fn clear_cover_cache() -> Result<usize, String> {
-    if let Ok(ref mut cache) = get_cover_cache().write() {
+pub fn clear_cover_cache(state: State<'_, AppState>) -> Result<usize, String> {
+    if let Ok(ref mut cache) = state.cover_cache.write() {
         let count = cache.index.len();
         cache.clear().map_err(|e| e.to_string())?;
         Ok(count)
@@ -617,8 +615,8 @@ pub fn clear_cover_cache() -> Result<usize, String> {
 }
 
 #[tauri::command]
-pub fn remove_cover(cover_id: String) -> Result<(), String> {
-    if let Ok(ref mut cache) = get_cover_cache().write() {
+pub fn remove_cover(cover_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(ref mut cache) = state.cover_cache.write() {
         cache.remove(&cover_id).map_err(|e| e.to_string())?;
         Ok(())
     } else {
@@ -626,11 +624,9 @@ pub fn remove_cover(cover_id: String) -> Result<(), String> {
     }
 }
 
-/// Remove covers from cache that are not referenced by any track.
-/// Returns the number of orphaned covers removed.
 #[tauri::command]
-pub fn cleanup_orphan_covers(referenced_cover_ids: Vec<String>) -> Result<usize, String> {
-    if let Ok(ref mut cache) = get_cover_cache().write() {
+pub fn cleanup_orphan_covers(referenced_cover_ids: Vec<String>, state: State<'_, AppState>) -> Result<usize, String> {
+    if let Ok(ref mut cache) = state.cover_cache.write() {
         let referenced: std::collections::HashSet<String> = referenced_cover_ids.into_iter().collect();
         let orphan_ids: Vec<String> = cache.index.keys()
             .filter(|id| !referenced.contains(*id))
@@ -644,10 +640,4 @@ pub fn cleanup_orphan_covers(referenced_cover_ids: Vec<String>) -> Result<usize,
     } else {
         Err("Cache lock failed".to_string())
     }
-}
-
-pub static COVER_CACHE: OnceLock<Arc<RwLock<CoverCache>>> = OnceLock::new();
-
-pub fn get_cover_cache() -> &'static Arc<RwLock<CoverCache>> {
-    COVER_CACHE.get_or_init(|| Arc::new(RwLock::new(CoverCache::new().expect("Failed to init cover cache"))))
 }

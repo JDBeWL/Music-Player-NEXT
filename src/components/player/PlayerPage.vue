@@ -4,7 +4,7 @@ import { Play, Music, Plus, Cloud, Folder } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
-import NeteasePage from './NeteasePage.vue';
+import NeteasePage from '@/components/netease/NeteasePage.vue';
 
 const playbackStore = usePlaybackStore();
 const playlistStore = usePlaylistStore();

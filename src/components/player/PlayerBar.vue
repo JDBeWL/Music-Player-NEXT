@@ -136,6 +136,8 @@ const RepeatIcon = computed(() => {
 const trackTitle = computed(() => props.currentTrack?.title || '未选择歌曲');
 const artistName = computed(() => props.currentTrack?.artist || '未知艺术家');
 
+// 图标组件已直接导入，无需额外映射
+
 function handleVolumeChange(value: number[] | undefined) {
   if (value && value.length > 0) {
     emit('volume-change', value[0]);

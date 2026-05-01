@@ -66,8 +66,56 @@ export class NativeAudioPlayer {
     });
   }
 
-  async load(track: AudioTrack, fileUrl: string): Promise<void> {
-    console.log('[NativePlayer] Loading track (no play):', track.title, fileUrl);
+  private async waitForCanPlay(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let cleanup = () => {};
+
+      const onCanPlay = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error('Failed to load audio'));
+      };
+
+      const removeListeners = () => {
+        this.audio.removeEventListener('canplay', onCanPlay);
+        this.audio.removeEventListener('error', onError);
+      };
+
+      this.audio.addEventListener('canplay', onCanPlay, { once: true });
+      this.audio.addEventListener('error', onError, { once: true });
+
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('Audio load timeout'));
+      }, 5000);
+
+      cleanup = () => {
+        clearTimeout(timeoutId);
+        removeListeners();
+      };
+    });
+  }
+
+  private async waitForDuration(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (this.audio.duration && !isNaN(this.audio.duration)) {
+        resolve();
+        return;
+      }
+      const onDurationChange = () => {
+        this.audio.removeEventListener('durationchange', onDurationChange);
+        resolve();
+      };
+      this.audio.addEventListener('durationchange', onDurationChange, { once: true });
+      setTimeout(resolve, 1000);
+    });
+  }
+
+  private async loadInternal(track: AudioTrack, fileUrl: string, autoPlay: boolean): Promise<void> {
+    console.log(`[NativePlayer] Loading track${autoPlay ? ' and playing' : ' (no play)'}:`, track.title, fileUrl);
 
     this.stop();
     this.currentTrack = track;
@@ -77,54 +125,16 @@ export class NativeAudioPlayer {
       this.audio.src = fileUrl;
       this.audio.load();
 
-      // 等待可以播放但不自动播放
-      await new Promise<void>((resolve, reject) => {
-        let cleanup = () => {};
+      await this.waitForCanPlay();
 
-        const onCanPlay = () => {
-          cleanup();
-          resolve();
-        };
-        const onError = () => {
-          cleanup();
-          reject(new Error('Failed to load audio'));
-        };
+      if (autoPlay) {
+        await this.audio.play();
+        console.log('[NativePlayer] Playing started');
+        return;
+      }
 
-        const removeListeners = () => {
-          this.audio.removeEventListener('canplay', onCanPlay);
-          this.audio.removeEventListener('error', onError);
-        };
+      await this.waitForDuration();
 
-        this.audio.addEventListener('canplay', onCanPlay, { once: true });
-        this.audio.addEventListener('error', onError, { once: true });
-
-        // 超时处理
-        const timeoutId = setTimeout(() => {
-          cleanup();
-          reject(new Error('Audio load timeout'));
-        }, 5000);
-
-        cleanup = () => {
-          clearTimeout(timeoutId);
-          removeListeners();
-        };
-      });
-
-      // 等待 duration 可用
-      await new Promise<void>((resolve) => {
-        if (this.audio.duration && !isNaN(this.audio.duration)) {
-          resolve();
-          return;
-        }
-        const onDurationChange = () => {
-          this.audio.removeEventListener('durationchange', onDurationChange);
-          resolve();
-        };
-        this.audio.addEventListener('durationchange', onDurationChange, { once: true });
-        setTimeout(resolve, 1000);
-      });
-
-      // 触发 progress 回调，让 store 获取 duration
       this.progressListeners.forEach(cb => cb(0, this.audio.duration || 0));
 
       this.setState('paused');
@@ -136,43 +146,12 @@ export class NativeAudioPlayer {
     }
   }
 
+  async load(track: AudioTrack, fileUrl: string): Promise<void> {
+    await this.loadInternal(track, fileUrl, false);
+  }
+
   async loadAndPlay(track: AudioTrack, fileUrl: string): Promise<void> {
-    console.log('[NativePlayer] Loading track:', track.title, fileUrl);
-
-    this.stop();
-    this.currentTrack = track;
-    this.setState('loading');
-
-    try {
-      this.audio.src = fileUrl;
-      this.audio.load();
-      
-      // 等待可以播放
-      await new Promise<void>((resolve, reject) => {
-        const onCanPlay = () => {
-          cleanup();
-          resolve();
-        };
-        const onError = () => {
-          cleanup();
-          reject(new Error('Failed to load audio'));
-        };
-        const cleanup = () => {
-          this.audio.removeEventListener('canplay', onCanPlay);
-          this.audio.removeEventListener('error', onError);
-        };
-        
-        this.audio.addEventListener('canplay', onCanPlay, { once: true });
-        this.audio.addEventListener('error', onError, { once: true });
-      });
-
-      await this.audio.play();
-      console.log('[NativePlayer] Playing started');
-    } catch (error) {
-      console.error('[NativePlayer] Failed to load and play:', error);
-      this.setState('error');
-      throw error;
-    }
+    await this.loadInternal(track, fileUrl, true);
   }
 
   play(): void {
@@ -244,9 +223,9 @@ export class NativeAudioPlayer {
     this.stopProgressTracking();
     this.progressInterval = window.setInterval(() => {
       this.progressListeners.forEach(cb => {
-        cb(this.getCurrentTime(), this.getDuration());
+        cb(this.audio.currentTime, this.audio.duration || 0);
       });
-    }, 250);
+    }, 100);
   }
 
   private stopProgressTracking(): void {

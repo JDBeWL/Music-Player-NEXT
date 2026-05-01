@@ -7,7 +7,8 @@ use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy};
 use tantivy::tokenizer::{NgramTokenizer, SimpleTokenizer, TextAnalyzer, LowerCaser};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use crate::AudioTrack;
+use crate::domain::models::AudioTrack;
+use crate::domain::utils::split_artists;
 
 pub struct SearchIndex {
     index: Index,
@@ -280,7 +281,7 @@ impl SearchIndex {
                 path,
                 title: title.clone(),
                 artist: artist.clone(),
-                artists: crate::split_artists(&artist),
+                artists: split_artists(&artist),
                 album,
                 duration,
                 file_format,

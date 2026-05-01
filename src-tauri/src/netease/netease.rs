@@ -6,36 +6,14 @@
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE, REFERER, USER_AGENT, CONTENT_TYPE};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::io::Write;
 use std::fs;
 use tauri_plugin_dialog::DialogExt;
+use tauri::State;
+use crate::domain::app_state::AppState;
 
 const DEFAULT_API_BASE_URL: &str = "https://netease-cloud-music-api-two-sandy.vercel.app";
-
-fn read_api_base_url_from_settings() -> String {
-    let path = crate::get_settings_path();
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(url) = json.get("netease_api_base_url").and_then(|v| v.as_str()) {
-                    if !url.is_empty() {
-                        return url.to_string();
-                    }
-                }
-            }
-        }
-    }
-    DEFAULT_API_BASE_URL.to_string()
-}
-
-static API_BASE_URL: OnceLock<Mutex<String>> = OnceLock::new();
-
-fn get_api_base_url() -> &'static Mutex<String> {
-    API_BASE_URL.get_or_init(|| {
-        Mutex::new(read_api_base_url_from_settings())
-    })
-}
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
@@ -62,6 +40,16 @@ fn get_download_client() -> &'static reqwest::Client {
     })
 }
 
+fn get_api_base_url_from_state(state: &State<'_, AppState>) -> String {
+    if let Ok(settings) = state.settings.read() {
+        let url = settings.netease_api_base_url.clone();
+        if !url.is_empty() {
+            return url;
+        }
+    }
+    DEFAULT_API_BASE_URL.to_string()
+}
+
 fn get_default_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -75,22 +63,12 @@ fn get_default_headers() -> HeaderMap {
     headers
 }
 
-/// 初始化 API 基地址（从配置文件读取后调用）
-pub fn init_api_base_url(url: &str) {
-    if !url.is_empty() {
-        if let Ok(mut base) = get_api_base_url().lock() {
-            *base = url.to_string();
-        }
-    }
-}
-
-/// 设置 API 基地址
 #[tauri::command]
-pub fn set_netease_api_base(url: String) {
-    if let Ok(mut base) = get_api_base_url().lock() {
-        *base = url.clone();
+pub fn set_netease_api_base(url: String, state: State<'_, AppState>) {
+    if let Ok(mut settings) = state.settings.write() {
+        settings.netease_api_base_url = url.clone();
     }
-    let path = crate::get_settings_path();
+    let path = crate::domain::utils::get_settings_path();
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -105,12 +83,9 @@ pub fn set_netease_api_base(url: String) {
     }
 }
 
-/// 获取当前 API 基地址
 #[tauri::command]
-pub fn get_netease_api_base() -> String {
-    get_api_base_url().lock()
-        .map(|b| b.clone())
-        .unwrap_or_else(|_| "".to_string())
+pub fn get_netease_api_base(state: State<'_, AppState>) -> String {
+    get_api_base_url_from_state(&state)
 }
 
 /// 从响应头中提取 Set-Cookie 并合并为一个字符串
@@ -154,10 +129,8 @@ fn inject_cookie_to_body(body: String, set_cookie: Option<String>) -> String {
 
 /// 通用 API 请求（无 cookie）
 #[tauri::command]
-pub async fn netease_api_request(path: String, params: String) -> Result<String, String> {
-    let base_url = get_api_base_url().lock()
-        .map(|b| b.clone())
-        .map_err(|e| format!("Failed to get API base URL: {}", e))?;
+pub async fn netease_api_request(path: String, params: String, state: State<'_, AppState>) -> Result<String, String> {
+    let base_url = get_api_base_url_from_state(&state);
 
     let params_map: HashMap<String, Value> = serde_json::from_str(&params)
         .unwrap_or_default();
@@ -212,10 +185,9 @@ pub async fn netease_api_request_with_cookie(
     path: String,
     params: String,
     cookie: String,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let base_url = get_api_base_url().lock()
-        .map(|b| b.clone())
-        .map_err(|e| format!("Failed to get API base URL: {}", e))?;
+    let base_url = get_api_base_url_from_state(&state);
 
     let params_map: HashMap<String, Value> = serde_json::from_str(&params)
         .unwrap_or_default();
