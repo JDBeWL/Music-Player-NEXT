@@ -94,6 +94,8 @@ pub struct AppSettings {
     pub netease_real_ip: String,
     #[serde(default = "default_netease_api_base_url")]
     pub netease_api_base_url: String,
+    #[serde(default)]
+    pub keyboard_shortcuts: Option<serde_json::Value>,
 }
 
 impl Default for AppSettings {
@@ -114,6 +116,7 @@ impl Default for AppSettings {
             persist_playback: default_persist_playback(),
             netease_real_ip: default_netease_real_ip(),
             netease_api_base_url: default_netease_api_base_url(),
+            keyboard_shortcuts: None,
         }
     }
 }
@@ -135,6 +138,7 @@ pub struct PartialSettings {
     pub persist_playback: Option<bool>,
     pub netease_real_ip: Option<String>,
     pub netease_api_base_url: Option<String>,
+    pub keyboard_shortcuts: Option<serde_json::Value>,
 }
 
 fn default_volume() -> f32 {

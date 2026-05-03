@@ -16,6 +16,12 @@ export const usePlaylistStore = defineStore('playlist', () => {
     return playlists.value.find(p => p.id === FAVORITE_PLAYLIST_ID) || null;
   });
 
+  const favoritePaths = computed(() => {
+    const fav = favoritePlaylist.value;
+    if (!fav) return new Set<string>();
+    return new Set(fav.tracks.map(t => t.path));
+  });
+
   function ensureFavoritePlaylist() {
     const existing = playlists.value.find(p => p.id === FAVORITE_PLAYLIST_ID);
     if (!existing) {
@@ -155,6 +161,7 @@ export const usePlaylistStore = defineStore('playlist', () => {
     currentPlaylistId,
     currentPlaylist,
     favoritePlaylist,
+    favoritePaths,
     ensureFavoritePlaylist,
     createPlaylist,
     deletePlaylist,

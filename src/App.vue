@@ -9,6 +9,8 @@ import { usePlayerControls } from './composables/usePlayerControls';
 import { usePlaylistManager } from './composables/usePlaylistManager';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 import { useAppInit } from './composables/useAppInit';
+import { useMediaSession } from './composables/useMediaSession';
+import ErrorBoundary from './components/common/ErrorBoundary.vue';
 import Sidebar from './components/common/Sidebar.vue';
 import TitleBar from './components/common/TitleBar.vue';
 import PlayerBar from './components/player/PlayerBar.vue';
@@ -17,6 +19,7 @@ import NowPlayingPanel from './components/player/NowPlayingPanel.vue';
 import ConfirmDialog from './components/common/ConfirmDialog.vue';
 import PromptDialog from './components/common/PromptDialog.vue';
 import CloseHintDialog from './components/common/CloseHintDialog.vue';
+import ToastContainer from './components/common/ToastContainer.vue';
 import AddToPlaylistDialog from './components/library/AddToPlaylistDialog.vue';
 
 const playbackStore = usePlaybackStore();
@@ -37,10 +40,6 @@ const {
 } = useNavigation();
 
 const {
-  isCurrentTrackFavorite,
-  cycleRepeatMode,
-  toggleShuffle,
-  toggleFavorite,
   playSearchAsNext,
 } = usePlayerControls();
 
@@ -55,23 +54,14 @@ const {
   cancelDeletePlaylist,
 } = usePlaylistManager();
 
-const closeHintDialogRef = ref<InstanceType<typeof CloseHintDialog> | null>(null);
+const closeHintDialogRef = ref<{ open: () => void } | null>(null);
 
 useKeyboardShortcuts();
-useAppInit(closeHintDialogRef as any);
+useAppInit(closeHintDialogRef);
+useMediaSession();
 
 const showQueuePanel = ref(false);
 const showNowPlayingPanel = ref(false);
-
-const favoritePaths = computed(() => {
-  const fav = playlistStore.favoritePlaylist;
-  if (!fav) return new Set<string>();
-  return new Set(fav.tracks.map(t => t.path));
-});
-
-function handleToggleFavorite(track: any) {
-  playlistStore.toggleFavorite(track);
-}
 
 watch(() => playbackStore.currentCoverUrl, (coverUrl) => {
   if (coverUrl) {
@@ -133,24 +123,20 @@ async function _confirmDeletePlaylist() {
             />
           </div>
 
-          <NowPlayingPanel
-            v-model="showNowPlayingPanel"
-            :current-track="playbackStore.currentTrack"
-            :current-time="playbackStore.currentTime"
-            @seek="playbackStore.setCurrentTime"
-          />
+          <ErrorBoundary>
+            <NowPlayingPanel
+              v-model="showNowPlayingPanel"
+              :current-track="playbackStore.currentTrack"
+              :current-time="playbackStore.currentTime"
+              @seek="playbackStore.setCurrentTime"
+            />
+          </ErrorBoundary>
 
-          <QueuePanel
-            v-model="showQueuePanel"
-            :queue="playbackStore.queue"
-            :current-index="playbackStore.currentIndex"
-            :is-playing="playbackStore.isPlaying"
-            :favorite-paths="favoritePaths"
-            @select-track="playbackStore.playTrack"
-            @remove-track="playbackStore.removeFromQueue"
-            @clear-queue="playbackStore.clearQueue"
-            @toggle-favorite="handleToggleFavorite"
-          />
+          <ErrorBoundary>
+            <QueuePanel
+              v-model="showQueuePanel"
+            />
+          </ErrorBoundary>
 
           <AddToPlaylistDialog v-model="showPlaylistDialog" />
         </main>
@@ -158,27 +144,10 @@ async function _confirmDeletePlaylist() {
     </div>
 
     <PlayerBar
-      :current-track="playbackStore.currentTrack"
-      :is-playing="playbackStore.isPlaying"
-      :current-time="playbackStore.currentTime"
-      :duration="playbackStore.duration"
-      :volume="playbackStore.volume"
-      :is-shuffle="playbackStore.isShuffle"
-      :repeat-mode="playbackStore.repeatMode"
       :show-queue-panel="showQueuePanel"
       :show-now-playing-panel="showNowPlayingPanel"
-      :cover-url="playbackStore.currentCoverUrl"
-      :is-favorite="isCurrentTrackFavorite"
-      @toggle-play="playbackStore.togglePlay"
-      @play-next="playbackStore.playNext"
-      @play-prev="playbackStore.playPrev"
-      @time-change="playbackStore.setCurrentTime"
-      @volume-change="playbackStore.setVolume"
-      @toggle-shuffle="toggleShuffle"
-      @cycle-repeat="cycleRepeatMode"
       @toggle-queue="showQueuePanel = !showQueuePanel"
       @toggle-now-playing="showNowPlayingPanel = !showNowPlayingPanel"
-      @toggle-favorite="toggleFavorite"
     />
 
     <ConfirmDialog
@@ -203,6 +172,7 @@ async function _confirmDeletePlaylist() {
     />
 
     <CloseHintDialog ref="closeHintDialogRef" />
+    <ToastContainer />
   </div>
 </template>
 

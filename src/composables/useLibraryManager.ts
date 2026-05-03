@@ -1,12 +1,13 @@
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useLibraryStore } from '@/stores/libraryStore';
-import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
+import { toast } from '@/services/toast';
 
 export function useLibraryManager() {
   const libraryStore = useLibraryStore();
-  const playbackStore = usePlaybackStore();
+  const queueStore = useQueueStore();
   const playlistStore = usePlaylistStore();
 
   const isScanning = ref(false);
@@ -19,6 +20,7 @@ export function useLibraryManager() {
       }
     } catch (error) {
       console.error('Failed to add folder:', error);
+      toast.error('选择文件夹失败');
     }
   }
 
@@ -32,7 +34,7 @@ export function useLibraryManager() {
   }
 
   function addSelectedToQueue() {
-    playbackStore.addSelectedToQueue(libraryStore.selectedFilesArray);
+    queueStore.addSelectedToQueue(libraryStore.selectedFilesArray);
     libraryStore.deselectAllFiles();
     libraryStore.isLocalBrowserOpen = false;
   }

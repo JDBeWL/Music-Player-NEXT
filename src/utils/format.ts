@@ -20,3 +20,7 @@ export function getFolderName(folderPath: string): string {
 export function getFolderPath(filePath: string): string {
   return filePath.split(/[/\\]/).slice(0, -1).join('/');
 }
+
+export function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/');
+}

@@ -16,7 +16,7 @@ const authStore = useNeteaseAuthStore();
 const searchStore = useNeteaseSearchStore();
 
 const emit = defineEmits<{
-  (e: 'logout'): void;
+  logout: [];
 }>();
 
 function getQrStatusText(): string {

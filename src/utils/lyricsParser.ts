@@ -1,23 +1,22 @@
-/**
- * 歌词解析器类，支持多种歌词格式
- */
 import type { LyricLine, LyricsFormat, KaraokeWord } from '@/types'
 
-// 让出主线程的辅助函数
 const yieldToMain = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 
-// 预编译正则表达式，避免重复编译
-const LRC_TIME_REGEX = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g
+const LRC_TIME_REGEX_SOURCE = '(\\d{2}):(\\d{2})(?:\\.(\\d{2,3}))?'
 const LRC_LINE_REGEX = /^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\](.*)$/
 const SRT_TIME_REGEX = /(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/
 const ASS_TIME_REGEX = /^(\d+):(\d{2}):(\d{2})\.(\d{2})$/
-const ASS_KARAOKE_TAG = /\{\\k[f]?(\d+)\}([^{}]*)/g
-const ASS_CLEAN_TAG = /\{.*?\}/g
+
+const LRC_TIME_REGEX = new RegExp(`\\[${LRC_TIME_REGEX_SOURCE}\\]`, 'g')
+const ASS_KARAOKE_TAG_REGEX = /\{\\k[f]?(\d+)\}([^{}]*)/g
+const ASS_CLEAN_TAG_REGEX = /\{.*?\}/g
+
+function parseLrcTimestamp(minutes: string, seconds: string, msStr: string | undefined): number {
+  const ms = msStr ? parseInt(msStr.padEnd(3, '0').substring(0, 3)) : 0
+  return parseInt(minutes) * 60 + parseInt(seconds) + ms / 1000
+}
 
 export class LyricsParser {
-  /**
-   * 解析歌词文件（同步版本，用于简单场景）
-   */
   static parse(content: string, format: LyricsFormat = 'auto'): LyricLine[] {
     if (!content || typeof content !== 'string') {
       return []
@@ -40,9 +39,6 @@ export class LyricsParser {
     }
   }
 
-  /**
-   * 异步解析歌词文件（支持卡拉OK、翻译，分块处理避免阻塞主线程）
-   */
   static async parseAsync(content: string, format: LyricsFormat = 'auto'): Promise<LyricLine[]> {
     if (!content || typeof content !== 'string') {
       return []
@@ -62,9 +58,6 @@ export class LyricsParser {
     }
   }
 
-  /**
-   * 自动检测歌词格式
-   */
   static detectFormat(content: string): LyricsFormat {
     if (content.includes('[Script Info]') || content.includes('[V4+ Styles]') || content.includes('[Events]')) {
       return 'ass'
@@ -75,9 +68,6 @@ export class LyricsParser {
     return 'lrc'
   }
 
-  /**
-   * 异步解析 LRC 格式歌词（支持卡拉OK、翻译、分块处理）
-   */
   static async parseLRCAsync(content: string): Promise<LyricLine[]> {
     const lines = content.split("\n")
     const resultMap: Record<number, LyricLine> = {}
@@ -89,15 +79,11 @@ export class LyricsParser {
       }
 
       const line = lines[i]
+      LRC_TIME_REGEX.lastIndex = 0
       const timestamps: Array<{ time: number; index: number }> = []
       let match: RegExpExecArray | null
-      LRC_TIME_REGEX.lastIndex = 0
       while ((match = LRC_TIME_REGEX.exec(line)) !== null) {
-        const minutes = parseInt(match[1])
-        const seconds = parseInt(match[2])
-        const msStr = match[3] || '0'
-        const milliseconds = parseInt(msStr.padEnd(3, '0').substring(0, 3))
-        const time = minutes * 60 + seconds + milliseconds / 1000
+        const time = parseLrcTimestamp(match[1], match[2], match[3])
         timestamps.push({ time, index: match.index })
       }
       if (timestamps.length < 1) continue
@@ -116,9 +102,6 @@ export class LyricsParser {
     return Object.values(resultMap).sort((a, b) => a.time - b.time)
   }
 
-  /**
-   * 异步解析 ASS 格式歌词（支持卡拉OK、翻译、分块处理）
-   */
   static async parseASSAsync(content: string): Promise<LyricLine[]> {
     const lines = content.split('\n')
     const dialogues: Array<{ startTime: number; endTime: number; style: string; text: string }> = []
@@ -144,17 +127,14 @@ export class LyricsParser {
       dialogues.push({ startTime: toSeconds(start), endTime: toSeconds(end), style, text })
     }
 
-    // 智能识别 style 名称
     const isTranslationStyle = (style: string): boolean => {
       const lowerStyle = style.toLowerCase()
-      // 翻译相关的 style 关键词
       const translationKeywords = ['ts', 'translation', 'trans', 'cn', 'zh', 'chs', 'cht', 'chinese', 'romaji', 'roma', 'chn', '翻译', '中文']
       return translationKeywords.some(keyword => lowerStyle.includes(keyword))
     }
 
     const isOriginalStyle = (style: string): boolean => {
       const lowerStyle = style.toLowerCase()
-      // 原歌词相关的 style 关键词（优先级低于翻译判断）
       const originalKeywords = ['orig', 'original', 'en', 'english', 'jp', 'ja', 'japanese', 'main', 'default', 'lyric', '原文', '日文', '英文']
       return originalKeywords.some(keyword => lowerStyle.includes(keyword))
     }
@@ -168,20 +148,15 @@ export class LyricsParser {
       const group = groupedMap.get(key)!
       group.styles.add(d.style)
 
-      // 智能判断是原歌词还是翻译
       if (isTranslationStyle(d.style)) {
-        // 明确是翻译的 style
         group.texts.ts = d.text
       } else if (isOriginalStyle(d.style) || group.texts.orig === '') {
-        // 明确是原歌词的 style，或者原歌词还是空的（第一个遇到的作为原歌词）
         if (group.texts.orig === '') {
           group.texts.orig = d.text
         } else if (!isTranslationStyle(d.style) && group.texts.ts === '') {
-          // 如果原歌词已有内容，且当前不是翻译 style，且翻译为空，则作为翻译
           group.texts.ts = d.text
         }
       } else {
-        // 其他情况：如果翻译为空，则作为翻译
         if (group.texts.ts === '') {
           group.texts.ts = d.text
         }
@@ -193,9 +168,9 @@ export class LyricsParser {
       const parseKaraoke = (text: string): KaraokeWord[] => {
         const words: KaraokeWord[] = []
         let accTime = group.startTime
+        ASS_KARAOKE_TAG_REGEX.lastIndex = 0
         let match: RegExpExecArray | null
-        ASS_KARAOKE_TAG.lastIndex = 0
-        while ((match = ASS_KARAOKE_TAG.exec(text)) !== null) {
+        while ((match = ASS_KARAOKE_TAG_REGEX.exec(text)) !== null) {
           const duration = parseInt(match[1]) * 0.01
           words.push({ text: match[2], start: accTime, end: accTime + duration })
           accTime += duration
@@ -205,7 +180,7 @@ export class LyricsParser {
       const enWords = parseKaraoke(group.texts.orig)
       result.push({
         time: group.startTime,
-        texts: [group.texts.orig.replace(ASS_CLEAN_TAG, ''), group.texts.ts.replace(ASS_CLEAN_TAG, '')],
+        texts: [group.texts.orig.replace(ASS_CLEAN_TAG_REGEX, ''), group.texts.ts.replace(ASS_CLEAN_TAG_REGEX, '')],
         words: enWords,
         karaoke: enWords.length > 0 ? { fullText: group.texts.orig, timings: [] } : null
       })
@@ -213,9 +188,6 @@ export class LyricsParser {
     return result.sort((a, b) => a.time - b.time)
   }
 
-  /**
-   * 解析 LRC 格式歌词（同步版本）
-   */
   static parseLRC(content: string): LyricLine[] {
     const lines = content.split('\n')
     const lyrics: LyricLine[] = []
@@ -224,26 +196,18 @@ export class LyricsParser {
       const trimmedLine = line.trim()
       if (!trimmedLine) continue
 
-      LRC_TIME_REGEX.lastIndex = 0
       const timeMatches = [...trimmedLine.matchAll(LRC_TIME_REGEX)]
       const textPart = trimmedLine.replace(LRC_TIME_REGEX, '').trim()
 
       if (timeMatches.length > 0 && textPart) {
         for (const match of timeMatches) {
-          const minutes = parseInt(match[1])
-          const seconds = parseInt(match[2])
-          const milliseconds = match[3] ? parseInt(match[3].padEnd(3, '0').substring(0, 3)) : 0
-          const time = minutes * 60 + seconds + milliseconds / 1000
+          const time = parseLrcTimestamp(match[1], match[2], match[3])
           lyrics.push({ time, text: textPart })
         }
       } else {
-        LRC_LINE_REGEX.lastIndex = 0
         const singleMatch = LRC_LINE_REGEX.exec(trimmedLine)
         if (singleMatch) {
-          const minutes = parseInt(singleMatch[1])
-          const seconds = parseInt(singleMatch[2])
-          const milliseconds = singleMatch[3] ? parseInt(singleMatch[3].padEnd(3, '0').substring(0, 3)) : 0
-          const time = minutes * 60 + seconds + milliseconds / 1000
+          const time = parseLrcTimestamp(singleMatch[1], singleMatch[2], singleMatch[3])
           const text = singleMatch[4].trim()
           if (text) {
             lyrics.push({ time, text })
@@ -256,9 +220,6 @@ export class LyricsParser {
     return lyrics
   }
 
-  /**
-   * 解析 ASS 格式歌词（同步版本）
-   */
   static parseASS(content: string): LyricLine[] {
     const lines = content.split('\n')
     const lyrics: LyricLine[] = []
@@ -292,7 +253,7 @@ export class LyricsParser {
 
           if (startIndex !== -1 && textIndex !== -1) {
             const startTime = this.parseASSTime(parts[startIndex])
-            const text = parts.slice(textIndex).join(',').replace(ASS_CLEAN_TAG, '').trim()
+            const text = parts.slice(textIndex).join(',').replace(ASS_CLEAN_TAG_REGEX, '').trim()
 
             if (text && startTime !== null) {
               lyrics.push({ time: startTime, text })
@@ -306,9 +267,6 @@ export class LyricsParser {
     return lyrics
   }
 
-  /**
-   * 解析 SRT 格式歌词
-   */
   static parseSRT(content: string): LyricLine[] {
     const blocks = content.trim().split(/\n\s*\n/)
     const lyrics: LyricLine[] = []
@@ -333,11 +291,7 @@ export class LyricsParser {
     return lyrics
   }
 
-  /**
-   * 解析 ASS 时间格式
-   */
   static parseASSTime(timeStr: string): number | null {
-    ASS_TIME_REGEX.lastIndex = 0
     const match = ASS_TIME_REGEX.exec(timeStr)
     if (match) {
       return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 +
@@ -346,9 +300,6 @@ export class LyricsParser {
     return null
   }
 
-  /**
-   * 将歌词数组转换为指定格式的字符串
-   */
   static stringify(lyrics: LyricLine[], format: LyricsFormat = 'lrc'): string {
     if (!lyrics || !Array.isArray(lyrics)) {
       return ''

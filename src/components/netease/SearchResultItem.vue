@@ -9,8 +9,20 @@ import {
 } from 'lucide-vue-next';
 import { formatDurationMs } from '@/utils/format';
 
+interface Song {
+  id: number;
+  name: string;
+  ar?: Array<{ name: string }>;
+  artists?: Array<{ name: string }>;
+  al?: { name: string; picUrl?: string };
+  album?: { name: string; picUrl?: string };
+  dt?: number;
+  duration?: number;
+  fee?: number;
+}
+
 const props = defineProps<{
-  song: any;
+  song: Song;
   index: number;
   isPlaying: boolean;
   isLoading: boolean;
@@ -19,11 +31,11 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'play'): void;
-  (e: 'download', event: Event): void;
+  play: [];
+  download: [event: Event];
 }>();
 
-function getFeeTag(fee: number): string {
+function getFeeTag(fee: number | undefined): string {
   switch (fee) {
     case 1: return 'VIP';
     case 4: return '付费';
@@ -31,17 +43,17 @@ function getFeeTag(fee: number): string {
   }
 }
 
-function getSongArtists(song: any): string {
+function getSongArtists(song: Song): string {
   const artists = song.ar || song.artists || [];
-  return artists.map((a: any) => a.name).join(' / ');
+  return artists.map((a) => a.name).join(' / ');
 }
 
-function getSongAlbum(song: any): any {
+function getSongAlbum(song: Song): { name: string; picUrl?: string } | undefined {
   return song.al || song.album;
 }
 
-function getSongDuration(song: any): number {
-  return song.dt || song.duration || 0;
+function getSongDuration(song: Song): number {
+  return song.dt ?? song.duration ?? 0;
 }
 </script>
 
@@ -59,7 +71,7 @@ function getSongDuration(song: any): number {
     <div class="result-cover">
       <img
         v-if="getSongAlbum(song)?.picUrl"
-        :src="getSongAlbum(song).picUrl + '?param=80y80'"
+        :src="(getSongAlbum(song)?.picUrl ?? '') + '?param=80y80'"
         class="cover-img"
         alt=""
         loading="lazy"
@@ -75,12 +87,12 @@ function getSongDuration(song: any): number {
       </div>
       <span class="result-artist">
         {{ getSongArtists(song) }}
-        <span v-if="getSongAlbum(song)?.name" class="result-album"> - {{ getSongAlbum(song).name }}</span>
+        <span v-if="getSongAlbum(song)?.name" class="result-album"> - {{ getSongAlbum(song)?.name }}</span>
       </span>
     </div>
     <div class="result-duration">
       <Clock :size="12" />
-      <span>{{ formatDurationMs(getSongDuration(song)) }}</span>
+      <span>{{ formatDurationMs(getSongDuration(song) || 0) }}</span>
     </div>
     <button
       class="result-download-btn"

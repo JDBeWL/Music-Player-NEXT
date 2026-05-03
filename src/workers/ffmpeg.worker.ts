@@ -10,6 +10,7 @@ interface WorkerMessage {
     audioData?: Uint8Array;
     extension?: string;
     trackId?: string;
+    sampleRate?: number;
   };
 }
 
@@ -23,7 +24,10 @@ function getBaseURL(): string {
   return self.location.origin;
 }
 
-async function initFFmpeg() {
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
+
+async function initFFmpeg(retryCount = 0): Promise<void> {
   if (isInitialized && ffmpeg) return;
 
   try {
@@ -59,15 +63,22 @@ async function initFFmpeg() {
       type: 'init-complete'
     } as WorkerResponse);
   } catch (error) {
-    console.error('[Worker] FFmpeg init failed:', error);
+    console.error(`[Worker] FFmpeg init failed (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
+    
+    if (retryCount < MAX_RETRIES - 1) {
+      console.log(`[Worker] Retrying in ${RETRY_DELAY}ms...`);
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      return initFFmpeg(retryCount + 1);
+    }
+    
     self.postMessage({
       type: 'error',
-      error: String(error)
+      error: `FFmpeg initialization failed after ${MAX_RETRIES} attempts: ${String(error)}`
     } as WorkerResponse);
   }
 }
 
-async function convertAudio(inputAudioData: Uint8Array, extension: string, trackId: string) {
+async function convertAudio(inputAudioData: Uint8Array, extension: string, trackId: string, sampleRate?: number) {
   if (!ffmpeg || !isInitialized) {
     throw new Error('FFmpeg not initialized');
   }
@@ -79,16 +90,14 @@ async function convertAudio(inputAudioData: Uint8Array, extension: string, track
     console.log('[Worker] Writing file...');
     await ffmpeg.writeFile(inputFileName, inputAudioData);
 
-    console.log('[Worker] Converting...');
-    await ffmpeg.exec([
-      '-i', inputFileName,
-      '-f', 'wav',
-      '-acodec', 'pcm_s16le',
-      '-ar', '44100',
-      '-ac', '2',
-      '-threads', '0',
-      outputFileName
-    ]);
+    const args = ['-i', inputFileName, '-f', 'wav', '-acodec', 'pcm_s16le'];
+    if (sampleRate && sampleRate > 0) {
+      args.push('-ar', String(sampleRate));
+    }
+    args.push('-ac', '2', '-threads', '0', outputFileName);
+
+    console.log('[Worker] Converting to WAV...');
+    await ffmpeg.exec(args);
 
     console.log('[Worker] Reading output...');
     const data = await ffmpeg.readFile(outputFileName);
@@ -129,7 +138,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     
     case 'convert':
       if (data?.audioData && data?.extension && data?.trackId) {
-        await convertAudio(data.audioData, data.extension, data.trackId);
+        await convertAudio(data.audioData, data.extension, data.trackId, data.sampleRate);
       }
       break;
   }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useVirtualList, useDebounceFn } from '@vueuse/core';
 import {
   Folder,
   Check,
@@ -16,28 +17,39 @@ import {
   ArrowDown,
 } from 'lucide-vue-next';
 import { useLibraryStore } from '@/stores/libraryStore';
-import { usePlaylistStore } from '@/stores/playlistStore';
-import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
+import { useTrackActions } from '@/composables/useTrackActions';
+import { VIRTUAL_LIST_ITEM_HEIGHT, VIRTUAL_LIST_OVERSCAN } from '@/constants/ui';
 import { getCoverUrl } from '@/utils/coverUrl';
 import { formatTime, getFolderName, getFolderPath } from '@/utils/format';
-import type { AudioTrack } from '@/types';
 
 const router = useRouter();
 const libraryStore = useLibraryStore();
-const playlistStore = usePlaylistStore();
-const playbackStore = usePlaybackStore();
+const queueStore = useQueueStore();
+
+const {
+  isTrackFavorite,
+  toggleFavorite,
+  addTrackToQueue,
+  playTrack,
+} = useTrackActions();
 
 const emit = defineEmits<{
-  (e: 'add-to-playlist'): void;
+  'add-to-playlist': [];
 }>();
 
 const tracks = computed(() => libraryStore.libraryTracks);
 const selectedIds = computed(() => libraryStore.selectedFileIds);
-const favoriteTrackPaths = computed(() => {
-  return new Set(playlistStore.favoritePlaylist?.tracks.map(t => t.path) ?? []);
-});
 
 const searchQuery = ref('');
+const debouncedSearchQuery = ref('');
+const updateDebouncedSearch = useDebounceFn(() => {
+  debouncedSearchQuery.value = searchQuery.value;
+}, 200);
+watch(searchQuery, () => {
+  updateDebouncedSearch();
+});
+
 const filterFolder = ref('');
 const filterArtist = ref('');
 const filterAlbum = ref('');
@@ -133,7 +145,7 @@ const filteredTracks = computed(() => {
   let result = tracks.value;
 
   if (showFavoritesOnly.value) {
-    result = result.filter(t => favoriteTrackPaths.value.has(t.path));
+    result = result.filter(t => isTrackFavorite(t.path));
   }
 
   if (filterFolder.value) {
@@ -160,8 +172,8 @@ const filteredTracks = computed(() => {
     result = result.filter(t => t.album === filterAlbum.value);
   }
 
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.trim().toLowerCase();
+  if (debouncedSearchQuery.value.trim()) {
+    const q = debouncedSearchQuery.value.trim().toLowerCase();
     result = result.filter(t =>
       t.title.toLowerCase().includes(q) ||
       t.artist.toLowerCase().includes(q) ||
@@ -199,28 +211,14 @@ const activeFilterCount = computed(() => {
 
 const hasSelection = computed(() => selectedIds.value.size > 0);
 
-function isTrackFavorite(trackPath: string): boolean {
-  return favoriteTrackPaths.value.has(trackPath);
-}
-
-function playTrack(track: AudioTrack) {
-  playbackStore.clearQueue();
-  playbackStore.addToQueue(track);
-  playbackStore.playTrack(0);
-}
-
 function playAll() {
   if (filteredTracks.value.length > 0) {
-    playbackStore.clearQueue();
+    queueStore.clearQueue();
     filteredTracks.value.forEach(track => {
-      playbackStore.addToQueue(track);
+      queueStore.addToQueue(track);
     });
-    playbackStore.playTrack(0);
+    queueStore.playTrack(0);
   }
-}
-
-function addTrackToQueue(track: AudioTrack) {
-  playbackStore.addToQueue(track);
 }
 
 function clearSearch() {
@@ -238,18 +236,22 @@ function clearAllFilters() {
 }
 
 function selectAllFiltered() {
-  const ids = filteredTracks.value.map(t => t.id);
-  libraryStore.selectedFileIds = new Set(ids);
+  libraryStore.selectAllFiles(filteredTracks.value.map(t => t.id));
 }
 
 function deselectAllFiles() {
   libraryStore.deselectAllFiles();
 }
+
+const { list: localVirtualList, containerProps: localContainerProps, wrapperProps: localWrapperProps } = useVirtualList(
+  filteredTracks,
+  { itemHeight: VIRTUAL_LIST_ITEM_HEIGHT, overscan: VIRTUAL_LIST_OVERSCAN }
+);
 </script>
 
 <template>
-  <section class="flex-1 overflow-hidden flex flex-col no-select" role="main" aria-label="本地音乐">
-    <header class="px-8 py-5 flex items-center justify-between no-select" style="border-bottom: 1px solid var(--border-subtle);">
+  <section class="flex-1 overflow-hidden flex flex-col" role="main" aria-label="本地音乐">
+    <header class="px-8 py-5 flex items-center justify-between" style="border-bottom: 1px solid var(--border-subtle);">
       <div>
         <h2 class="text-3xl font-bold text-[var(--text-primary)]">本地文件</h2>
         <p class="text-sm text-[var(--text-tertiary)] mt-1" v-if="tracks.length > 0">
@@ -257,7 +259,7 @@ function deselectAllFiles() {
         </p>
       </div>
       <div class="flex gap-2" v-if="hasSelection">
-        <button class="md3-btn-filled text-sm" @click="playbackStore.addSelectedToQueue(libraryStore.selectedFilesArray); libraryStore.deselectAllFiles();">
+        <button class="md3-btn-filled text-sm" @click="queueStore.addSelectedToQueue(libraryStore.selectedFilesArray); libraryStore.deselectAllFiles();">
           添加到队列
         </button>
         <button class="md3-btn-outlined text-sm" @click="emit('add-to-playlist')">
@@ -433,58 +435,63 @@ function deselectAllFiles() {
         </div>
 
         <div class="px-4 py-2">
-          <div
-            v-for="track in filteredTracks"
-            :key="track.id"
-            class="flex items-center mt-1 gap-3 px-4 py-2.5 rounded-md hover:bg-[var(--hover-overlay)] transition-colors duration-100 group cursor-pointer"
-            :class="{ 'bg-[var(--color-primary-container)]': selectedIds.has(track.id) }"
-            @dblclick="playTrack(track)"
-          >
-            <div
-              class="w-5 h-5 rounded-md border-2 flex items-center justify-center cursor-pointer transition-all duration-150 flex-shrink-0"
-              :class="selectedIds.has(track.id) ? 'bg-[var(--color-primary)] border-[var(--color-primary)]' : 'border-[var(--text-disabled)] group-hover:border-[var(--color-primary)]'"
-              @click.stop="libraryStore.toggleFileSelection(track.id)"
-            >
-              <Check v-if="selectedIds.has(track.id)" :size="12" class="text-[var(--text-on-primary)]" />
-            </div>
-
-            <div class="w-10 h-10 rounded-[4px] overflow-hidden flex-shrink-0 bg-[var(--bg-tertiary)]">
-              <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="" class="w-full h-full object-cover" />
-              <div v-else class="w-full h-full flex items-center justify-center">
-                <Music :size="16" class="text-[var(--text-tertiary)]" />
-              </div>
-            </div>
-
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-[var(--text-primary)] text-sm font-medium truncate flex-1 min-w-1">{{ track.title }}</span>
-              </div>
-              <div class="text-[var(--text-tertiary)] text-xs flex items-center overflow-hidden gap-1 min-w-0">
-                <span v-if="track.format" class="track-format-tag shrink-0">{{ track.format.toUpperCase() }}</span>
-                <span class="truncate min-w-0 flex-shrink">{{ track.artist }}{{ track.album && track.album !== 'Unknown Album' ? ` · ${track.album}` : '' }}</span>
-              </div>
-            </div>
-
-            <div class="track-actions">
-              <span class="track-path-text group-hover:opacity-0">{{ getFolderPath(track.path) }}</span>
-              <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
-              <div class="track-action-btns opacity-0 group-hover:opacity-100">
-                <button
-                  class="md3-icon-btn-xs state-layer"
-                  @click.stop="addTrackToQueue(track)"
-                  title="添加到队列"
+          <div v-bind="localContainerProps" class="virtual-list-container">
+            <div v-bind="localWrapperProps">
+              <div
+                v-for="{ data: track } in localVirtualList"
+                :key="track.id"
+                class="flex items-center gap-3 px-4 rounded-md hover:bg-[var(--hover-overlay)] transition-colors duration-100 group cursor-pointer"
+                :style="{ height: `${VIRTUAL_LIST_ITEM_HEIGHT}px` }"
+                :class="{ 'bg-[var(--color-primary-container)]': selectedIds.has(track.id) }"
+                @dblclick="playTrack(track)"
+              >
+                <div
+                  class="w-5 h-5 rounded-md border-2 flex items-center justify-center cursor-pointer transition-all duration-150 flex-shrink-0"
+                  :class="selectedIds.has(track.id) ? 'bg-[var(--color-primary)] border-[var(--color-primary)]' : 'border-[var(--text-disabled)] group-hover:border-[var(--color-primary)]'"
+                  @click.stop="libraryStore.toggleFileSelection(track.id)"
                 >
-                  <ListPlus :size="16" />
-                </button>
+                  <Check v-if="selectedIds.has(track.id)" :size="12" class="text-[var(--text-on-primary)]" />
+                </div>
 
-                <button
-                  class="md3-icon-btn-xs state-layer"
-                  :class="{ 'text-red-400': isTrackFavorite(track.path) }"
-                  @click.stop="async () => { playlistStore.toggleFavorite(track); await libraryStore.persistLibrary(); }"
-                  title="收藏"
-                >
-                  <Heart :size="16" :fill="isTrackFavorite(track.path) ? 'currentColor' : 'none'" />
-                </button>
+                <div class="w-10 h-10 rounded-[4px] overflow-hidden flex-shrink-0 bg-[var(--bg-tertiary)]">
+                  <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="" class="w-full h-full object-cover" />
+                  <div v-else class="w-full h-full flex items-center justify-center">
+                    <Music :size="16" class="text-[var(--text-tertiary)]" />
+                  </div>
+                </div>
+
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[var(--text-primary)] text-sm font-medium truncate flex-1 min-w-1">{{ track.title }}</span>
+                  </div>
+                  <div class="text-[var(--text-tertiary)] text-xs flex items-center overflow-hidden gap-1 min-w-0">
+                    <span v-if="track.format" class="track-format-tag shrink-0">{{ track.format.toUpperCase() }}</span>
+                    <span class="truncate min-w-0 flex-shrink">{{ track.artist }}{{ track.album && track.album !== 'Unknown Album' ? ` · ${track.album}` : '' }}</span>
+                  </div>
+                </div>
+
+                <div class="track-actions">
+                  <span class="track-path-text group-hover:opacity-0">{{ getFolderPath(track.path) }}</span>
+                  <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
+                  <div class="track-action-btns opacity-0 group-hover:opacity-100">
+                    <button
+                      class="md3-icon-btn-xs state-layer"
+                      @click.stop="addTrackToQueue(track)"
+                      title="添加到队列"
+                    >
+                      <ListPlus :size="16" />
+                    </button>
+
+                    <button
+                      class="md3-icon-btn-xs state-layer"
+                      :class="{ 'text-red-400': isTrackFavorite(track.path) }"
+                      @click.stop="toggleFavorite(track)"
+                      title="收藏"
+                    >
+                      <Heart :size="16" :fill="isTrackFavorite(track.path) ? 'currentColor' : 'none'" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -518,9 +525,9 @@ function deselectAllFiles() {
 </template>
 
 <style scoped>
-.no-select {
-  user-select: none;
-  -webkit-user-select: none;
+.virtual-list-container {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .filter-dropdown {

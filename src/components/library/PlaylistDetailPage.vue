@@ -1,24 +1,32 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue';
 import { useRoute } from 'vue-router';
 import { Play, Edit, Music, Heart, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
 import { formatTime } from '@/utils/format';
 import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { useLibraryStore } from '@/stores/libraryStore';
+import { useTrackActions } from '@/composables/useTrackActions';
 import type { AudioTrack } from '@/types';
+
+const ITEM_HEIGHT = 72;
+const OVERSCAN = 5; // 上下额外渲染的项数
+const MAX_VIRTUAL_ITEMS = 100; // 超过此数量启用虚拟滚动
 
 const route = useRoute();
 const playbackStore = usePlaybackStore();
+const queueStore = useQueueStore();
 const playlistStore = usePlaylistStore();
 const libraryStore = useLibraryStore();
+
+const { isTrackFavorite, toggleFavorite } = useTrackActions();
 
 const playlistId = computed(() => route.params.id as string);
 const playlist = computed(() => playlistStore.playlists.find(p => p.id === playlistId.value)!);
 const currentTrackId = computed(() => playbackStore.currentTrack?.id);
 const isPlaying = computed(() => playbackStore.isPlaying);
-const favoriteTrackPaths = computed(() => playlistStore.favoritePlaylist?.tracks.map(t => t.path) ?? []);
 
 type SortKey = 'default' | 'title' | 'artist' | 'album' | 'duration';
 type SortOrder = 'asc' | 'desc';
@@ -47,33 +55,45 @@ const sortOptions: { key: SortKey; label: string }[] = [
   { key: 'duration', label: '按时长' },
 ];
 
-const sortedTracks = computed(() => {
-  const pl = playlist.value;
-  if (!pl) return [];
-  if (sortKey.value !== 'default') {
-    return [...pl.tracks].sort((a, b) => {
-      let aVal: string | number;
-      let bVal: string | number;
-      switch (sortKey.value) {
-        case 'title': aVal = a.title.toLowerCase(); bVal = b.title.toLowerCase(); break;
-        case 'artist': aVal = a.artist.toLowerCase(); bVal = b.artist.toLowerCase(); break;
-        case 'album': aVal = a.album.toLowerCase(); bVal = b.album.toLowerCase(); break;
-        case 'duration': aVal = a.duration; bVal = b.duration; break;
-        default: return 0;
-      }
-      if (aVal < bVal) return sortOrder.value === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortOrder.value === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }
-  if (isDragging.value && draggedIndex.value !== null && dragOverIndex.value !== null) {
-    const tracks = [...pl.tracks];
-    const [removed] = tracks.splice(draggedIndex.value, 1);
-    tracks.splice(dragOverIndex.value, 0, removed);
-    return tracks;
-  }
-  return pl.tracks;
-});
+// 使用 shallowRef 缓存排序结果，避免深层响应式追踪
+const sortedTracksCache = shallowRef<AudioTrack[]>([]);
+
+watch(
+  [() => playlist.value?.tracks, sortKey, sortOrder, isDragging, draggedIndex, dragOverIndex],
+  () => {
+    const pl = playlist.value;
+    if (!pl) {
+      sortedTracksCache.value = [];
+      return;
+    }
+    if (sortKey.value !== 'default') {
+      sortedTracksCache.value = [...pl.tracks].sort((a, b) => {
+        let aVal: string | number;
+        let bVal: string | number;
+        switch (sortKey.value) {
+          case 'title': aVal = a.title.toLowerCase(); bVal = b.title.toLowerCase(); break;
+          case 'artist': aVal = a.artist.toLowerCase(); bVal = b.artist.toLowerCase(); break;
+          case 'album': aVal = a.album.toLowerCase(); bVal = b.album.toLowerCase(); break;
+          case 'duration': aVal = a.duration; bVal = b.duration; break;
+          default: return 0;
+        }
+        if (aVal < bVal) return sortOrder.value === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortOrder.value === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else if (isDragging.value && draggedIndex.value !== null && dragOverIndex.value !== null) {
+      const tracks = [...pl.tracks];
+      const [removed] = tracks.splice(draggedIndex.value, 1);
+      tracks.splice(dragOverIndex.value, 0, removed);
+      sortedTracksCache.value = tracks;
+    } else {
+      sortedTracksCache.value = pl.tracks;
+    }
+  },
+  { immediate: true }
+);
+
+const sortedTracks = computed(() => sortedTracksCache.value);
 
 function toggleSortMenu() { showSortMenu.value = !showSortMenu.value; }
 
@@ -96,12 +116,18 @@ onMounted(() => {
   document.addEventListener('click', closeSortMenu);
   document.addEventListener('mousemove', handleMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
+  updateContainerHeight();
+  window.addEventListener('resize', updateContainerHeight);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', closeSortMenu);
   document.removeEventListener('mousemove', handleMouseMove);
   document.removeEventListener('mouseup', handleMouseUp);
+  window.removeEventListener('resize', updateContainerHeight);
+  if (longPressTimer !== null) {
+    clearTimeout(longPressTimer);
+  }
 });
 
 function handleTrackMouseDown(e: MouseEvent, index: number) {
@@ -167,7 +193,7 @@ async function handleMouseUp() {
     const toIndex = dragOverIndex.value;
     if (fromIndex !== null && toIndex !== null && fromIndex !== toIndex) {
       if (playlistId.value) playlistStore.reorderPlaylistTracks(playlistId.value, fromIndex, toIndex);
-      await libraryStore.persistLibrary();
+      await libraryStore.persistLibrary(playlistStore.playlists);
     }
   }
   if (longPressTimer !== null) {
@@ -191,6 +217,55 @@ const playlistCover = computed(() => {
 
 const trackListRef = ref<HTMLElement | null>(null);
 
+// 虚拟滚动状态
+const scrollTop = ref(0);
+const containerHeight = ref(0);
+
+const shouldVirtualize = computed(() => sortedTracks.value.length > MAX_VIRTUAL_ITEMS);
+
+const virtualRange = computed(() => {
+  if (!shouldVirtualize.value) {
+    return { start: 0, end: sortedTracks.value.length };
+  }
+  const start = Math.max(0, Math.floor(scrollTop.value / ITEM_HEIGHT) - OVERSCAN);
+  const end = Math.min(
+    sortedTracks.value.length,
+    Math.ceil((scrollTop.value + containerHeight.value) / ITEM_HEIGHT) + OVERSCAN
+  );
+  return { start, end };
+});
+
+interface VirtualTrackItem {
+  track: AudioTrack;
+  index: number;
+  style: Record<string, string> | undefined;
+}
+
+const virtualTracks = computed<VirtualTrackItem[]>(() => {
+  const { start, end } = virtualRange.value;
+  return sortedTracks.value.slice(start, end).map((track, index) => ({
+    track,
+    index: start + index,
+    style: shouldVirtualize.value
+      ? { position: 'absolute', top: `${(start + index) * ITEM_HEIGHT}px`, width: '100%' }
+      : undefined,
+  }));
+});
+
+const totalHeight = computed(() =>
+  shouldVirtualize.value ? sortedTracks.value.length * ITEM_HEIGHT : 'auto'
+);
+
+function handleListScroll(e: Event) {
+  scrollTop.value = (e.target as HTMLElement).scrollTop;
+}
+
+function updateContainerHeight() {
+  if (trackListRef.value) {
+    containerHeight.value = trackListRef.value.clientHeight;
+  }
+}
+
 watch(() => playlist.value?.description, (newDesc) => {
   descriptionText.value = newDesc || '';
 }, { immediate: true });
@@ -200,7 +275,7 @@ function startEditDescription() { isEditingDescription.value = true; }
 async function saveDescription() {
   if (playlistId.value) playlistStore.updatePlaylistDescription(playlistId.value, descriptionText.value);
   isEditingDescription.value = false;
-  await libraryStore.persistLibrary();
+  await libraryStore.persistLibrary(playlistStore.playlists);
 }
 
 function cancelEditDescription() {
@@ -208,26 +283,17 @@ function cancelEditDescription() {
   isEditingDescription.value = false;
 }
 
-function isTrackFavorite(trackPath: string): boolean {
-  return favoriteTrackPaths.value.includes(trackPath);
-}
-
 function playPlaylist() {
-  if (playlist.value) playbackStore.loadPlaylistToQueue(playlist.value.tracks, playlistId.value);
+  if (playlist.value) queueStore.loadPlaylistToQueue(playlist.value.tracks, playlistId.value);
 }
 
 function playTrack(trackId: string) {
-  if (playlist.value) playbackStore.playTrackFromPlaylist(playlist.value.tracks, playlistId.value, trackId);
-}
-
-async function toggleFavorite(track: AudioTrack) {
-  playlistStore.toggleFavorite(track);
-  await libraryStore.persistLibrary();
+  if (playlist.value) queueStore.playTrackFromPlaylist(playlist.value.tracks, playlistId.value, trackId);
 }
 
 async function removeTrack(trackId: string) {
   if (playlistId.value) playlistStore.removeFromPlaylist(playlistId.value, trackId);
-  await libraryStore.persistLibrary();
+  await libraryStore.persistLibrary(playlistStore.playlists);
 }
 </script>
 
@@ -245,13 +311,13 @@ async function removeTrack(trackId: string) {
 
           <div class="flex-1 flex flex-col justify-end">
             <h1 class="text-4xl font-bold text-[var(--text-primary)] mb-3">{{ playlist.name }}</h1>
-            <p class="text-[var(--text-tertiary)] mb-4 no-select">{{ playlist.tracks.length }} 首歌曲</p>
+            <p class="text-[var(--text-tertiary)] mb-4">{{ playlist.tracks.length }} 首歌曲</p>
 
             <div class="mb-4">
               <div v-if="!isEditingDescription">
                 <p v-if="playlist.description" class="text-[var(--text-secondary)]">{{ playlist.description }}</p>
                 <p v-else class="text-[var(--text-disabled)]">添加描述...</p>
-                <button class="mt-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] flex items-center gap-1.5 no-select transition-colors" @click="startEditDescription">
+                <button class="mt-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] flex items-center gap-1.5 transition-colors" @click="startEditDescription">
                   <Edit :size="14" />
                   编辑
                 </button>
@@ -279,7 +345,7 @@ async function removeTrack(trackId: string) {
 
         <div>
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-semibold text-[var(--text-primary)] no-select">歌曲列表</h3>
+            <h3 class="text-xl font-semibold text-[var(--text-primary)]">歌曲列表</h3>
             <div class="relative sort-dropdown no-select">
               <button
                 class="md3-chip no-select min-w-[150px]"
@@ -314,17 +380,18 @@ async function removeTrack(trackId: string) {
             <p class="text-sm text-[var(--text-tertiary)]">添加一些歌曲来填充这个列表</p>
           </div>
 
-          <div v-else ref="trackListRef" class="space-y-2">
+          <div v-else ref="trackListRef" class="space-y-2 relative" :style="{ height: typeof totalHeight === 'number' ? `${totalHeight}px` : 'auto' }" @scroll="handleListScroll">
             <div
-              v-for="(track, trackIndex) in sortedTracks"
+              v-for="{ track, index: trackIndex, style } in virtualTracks"
               :key="track.id"
               class="track-item flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-150 group no-select relative state-layer"
               :class="[
                 isDragging && track.id === draggedTrackId ? 'opacity-50 scale-[0.98] elevation-2 z-10' : '',
                 !isDragging && track.id === currentTrackId ? 'bg-[var(--color-primary-container)]' : '',
                 isLongPressing && !isDragging && track.id === draggedTrackId ? 'scale-[0.98] opacity-80' : '',
-                isDragging ? 'cursor-grabbing' : sortKey === 'default' ? 'cursor-grab' : 'cursor-pointer'
+                isDragging ? 'cursor-grabbing' : 'cursor-pointer'
               ]"
+              :style="style"
               @mousedown="handleTrackMouseDown($event, trackIndex)"
               @dragstart.prevent
             >

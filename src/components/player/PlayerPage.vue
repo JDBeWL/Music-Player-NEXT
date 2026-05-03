@@ -2,16 +2,16 @@
 import { ref, computed } from 'vue';
 import { Play, Music, Plus, Cloud, Folder } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
-import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import NeteasePage from '@/components/netease/NeteasePage.vue';
 
-const playbackStore = usePlaybackStore();
+const queueStore = useQueueStore();
 const playlistStore = usePlaylistStore();
 
 const emit = defineEmits<{
-  (e: 'create-playlist'): void;
-  (e: 'open-playlist', id: string): void;
+  'create-playlist': [];
+  'open-playlist': [id: string];
 }>();
 
 const activeTab = ref<'local' | 'netease'>('local');
@@ -21,13 +21,13 @@ const playlists = computed(() => playlistStore.playlists);
 function playPlaylist(id: string) {
   const playlist = playlistStore.playlists.find(p => p.id === id);
   if (playlist) {
-    playbackStore.loadPlaylistToQueue(playlist.tracks, id);
+    queueStore.loadPlaylistToQueue(playlist.tracks, id);
   }
 }
 </script>
 
 <template>
-  <section class="flex-1 overflow-hidden flex flex-col no-select" role="main" aria-label="我的音乐">
+  <section class="flex-1 overflow-hidden flex flex-col" role="main" aria-label="我的音乐">
     <div class="header-bar">
       <h2 class="header-title">我的音乐</h2>
       <div class="tab-group">
@@ -50,7 +50,7 @@ function playPlaylist(id: string) {
       </div>
     </div>
 
-    <div v-show="activeTab === 'local'" class="flex-1 overflow-y-auto px-8 py-6">
+    <div v-if="activeTab === 'local'" class="flex-1 overflow-y-auto px-8 py-6">
       <div class="mb-6">
         <div class="flex items-center justify-between mb-6">
           <h3 class="text-xl font-semibold text-[var(--text-primary)]">播放列表</h3>
@@ -81,7 +81,7 @@ function playPlaylist(id: string) {
                 <Music :size="48" class="text-[var(--text-tertiary)]" />
               </div>
               <button
-                class="absolute bottom-3 right-3 w-12 h-12 bg-[var(--color-primary)] rounded-xl flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 hover:brightness-110"
+                class="absolute bottom-3 right-3 w-12 h-12 bg-[var(--color-primary)] rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 hover:brightness-110"
                 @click.stop="playPlaylist(playlist.id)"
               >
                 <Play :size="20" class="text-[var(--text-on-primary)] ml-0.5" fill="white" />
@@ -109,18 +109,13 @@ function playPlaylist(id: string) {
       </div>
     </div>
 
-    <div v-show="activeTab === 'netease'" class="flex-1 overflow-hidden">
+    <div v-if="activeTab === 'netease'" class="flex-1 overflow-hidden">
       <NeteasePage />
     </div>
   </section>
 </template>
 
 <style scoped>
-.no-select {
-  user-select: none;
-  -webkit-user-select: none;
-}
-
 .header-bar {
   display: flex;
   align-items: center;

@@ -4,27 +4,40 @@
 
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import { MotionPlugin } from '@vueuse/motion';
-import { listen } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import App from './App.vue';
 import router from './router';
 import { unifiedAudioPlayer } from './services/audio/UnifiedAudioPlayer';
-import { usePlaybackStore } from './stores/playbackStore';
+import { useQueueStore } from './stores/queueStore';
+import { toast } from './services/toast';
 import './styles/index.css';
 
 const app = createApp(App);
 const pinia = createPinia();
 
+app.config.errorHandler = (err, _instance, info) => {
+  console.error('[Vue Error]', info, err);
+  const message = err instanceof Error ? err.message : String(err);
+  toast.error(`应用错误：${message}`);
+};
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Unhandled Promise]', event.reason);
+  const message = event.reason instanceof Error ? event.reason.message : String(event.reason);
+  toast.error(`未处理的错误：${message}`);
+});
+
 app.use(pinia);
 app.use(router);
-app.use(MotionPlugin);
 app.mount('#app');
 
 unifiedAudioPlayer.init().catch(err => {
   console.warn('[Main] Failed to pre-initialize audio player:', err);
 });
 
-const playbackStore = usePlaybackStore();
+const queueStore = useQueueStore();
+
+let playerControlUnlisten: UnlistenFn | null = null;
 
 listen<{ detail: string; mode?: string | boolean }>('player-control', (event) => {
   const { detail, mode } = event.payload;
@@ -32,13 +45,13 @@ listen<{ detail: string; mode?: string | boolean }>('player-control', (event) =>
 
   switch (detail) {
     case 'toggle':
-      playbackStore.togglePlay();
+      queueStore.togglePlay();
       break;
     case 'next':
-      playbackStore.playNext();
+      queueStore.playNext();
       break;
     case 'prev':
-      playbackStore.playPrev();
+      queueStore.playPrev();
       break;
     case 'loop':
       if (typeof mode === 'string') {
@@ -49,14 +62,23 @@ listen<{ detail: string; mode?: string | boolean }>('player-control', (event) =>
         };
         const mappedMode = modeMap[mode];
         if (mappedMode) {
-          playbackStore.setRepeatMode(mappedMode);
+          queueStore.setRepeatMode(mappedMode);
         }
       }
       break;
     case 'shuffle':
-      playbackStore.toggleShuffle();
+      queueStore.toggleShuffle();
       break;
   }
+}).then(unlistenFn => {
+  playerControlUnlisten = unlistenFn;
 }).catch(err => {
   console.error('[Main] Failed to listen to player-control event:', err);
+});
+
+window.addEventListener('beforeunload', () => {
+  if (playerControlUnlisten) {
+    playerControlUnlisten();
+    playerControlUnlisten = null;
+  }
 });

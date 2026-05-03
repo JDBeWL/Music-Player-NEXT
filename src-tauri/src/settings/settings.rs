@@ -94,6 +94,7 @@ pub async fn update_settings(
         if let Some(v) = partial.persist_playback { settings.persist_playback = v; }
         if let Some(v) = partial.netease_real_ip { settings.netease_real_ip = v; }
         if let Some(v) = partial.netease_api_base_url { settings.netease_api_base_url = v; }
+        if let Some(v) = partial.keyboard_shortcuts { settings.keyboard_shortcuts = Some(v); }
 
         settings.clone()
     };

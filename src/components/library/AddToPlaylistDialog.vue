@@ -12,7 +12,7 @@ async function handleAddToPlaylist(playlistId: string) {
   libraryStore.deselectAllFiles();
   libraryStore.isLocalBrowserOpen = false;
   show.value = false;
-  await libraryStore.persistLibrary();
+  await libraryStore.persistLibrary(playlistStore.playlists);
 }
 </script>
 

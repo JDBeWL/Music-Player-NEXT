@@ -1,0 +1,2 @@
+export const VIRTUAL_LIST_ITEM_HEIGHT = 56;
+export const VIRTUAL_LIST_OVERSCAN = 5;

@@ -1,14 +1,12 @@
 import { onMounted, onUnmounted } from 'vue';
-import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useNavigation } from '@/composables/useNavigation';
-import { usePlayerControls } from '@/composables/usePlayerControls';
 
 export function useKeyboardShortcuts() {
-  const playbackStore = usePlaybackStore();
+  const queueStore = useQueueStore();
   const configStore = useConfigStore();
   const { navigateBack, navigateForward } = useNavigation();
-  const { handlePlayNext, cycleRepeatMode, toggleShuffle } = usePlayerControls();
 
   function handleGlobalKeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -25,7 +23,7 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         switch (action) {
           case 'togglePlay':
-            playbackStore.togglePlay();
+            queueStore.togglePlay();
             break;
           case 'navigateBack':
             navigateBack();
@@ -34,16 +32,16 @@ export function useKeyboardShortcuts() {
             navigateForward();
             break;
           case 'toggleShuffle':
-            toggleShuffle();
+            queueStore.toggleShuffle();
             break;
           case 'cycleRepeat':
-            cycleRepeatMode();
+            queueStore.cycleRepeatMode();
             break;
           case 'playNext':
-            handlePlayNext();
+            queueStore.playNext();
             break;
           case 'playPrev':
-            playbackStore.playPrev();
+            queueStore.playPrev();
             break;
         }
         return;

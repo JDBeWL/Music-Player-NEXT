@@ -1,10 +1,5 @@
 import { ref } from 'vue';
-import {
-  QuantizerCelebi,
-  Score,
-  Hct,
-  TonalPalette,
-} from '@material/material-color-utilities';
+import { LRUCache } from '@/utils/lruCache';
 
 export interface ThemeColors {
   primary: string;
@@ -22,55 +17,58 @@ const DEFAULT_THEME: ThemeColors = {
 
 const currentTheme = ref<ThemeColors>({ ...DEFAULT_THEME });
 
-// LRU Cache with max size
-class LRUCache<K, V> {
-  private cache = new Map<K, V>();
-  constructor(private maxSize: number) {}
-
-  get(key: K): V | undefined {
-    const value = this.cache.get(key);
-    if (value !== undefined) {
-      this.cache.delete(key);
-      this.cache.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: K, value: V): void {
-    if (this.cache.has(key)) {
-      this.cache.delete(key);
-    } else if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey !== undefined) {
-        this.cache.delete(firstKey);
-      }
-    }
-    this.cache.set(key, value);
-  }
-
-  clear(): void {
-    this.cache.clear();
-  }
-}
-
 const colorCache = new LRUCache<string, ThemeColors>(100);
 
-// In-flight request deduplication
 const pendingExtractions = new Map<string, Promise<ThemeColors | null>>();
 
-// Convert HCT to RGB array
-function hctToRgb(hct: Hct): [number, number, number] {
-  return [
-    Math.round(hct.toInt() >> 16 & 0xff),
-    Math.round(hct.toInt() >> 8 & 0xff),
-    Math.round(hct.toInt() & 0xff),
-  ];
+let worker: Worker | null = null;
+let workerInitPromise: Promise<Worker> | null = null;
+
+function getWorker(): Promise<Worker> {
+  if (worker) return Promise.resolve(worker);
+
+  if (workerInitPromise) return workerInitPromise;
+
+  workerInitPromise = (async (): Promise<Worker> => {
+    const w = new Worker(new URL('../workers/themeColor.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    worker = w;
+    return w;
+  })();
+
+  return workerInitPromise;
 }
 
-// Convert RGB to hex string
-function rgbToHex(r: number, g: number, b: number): string {
-  return `#${[r, g, b].map(x => x.toString(16).padStart(2, '0')).join('')}`;
+interface WorkerResponse {
+  type: 'extract-result';
+  url: string;
+  theme: ThemeColors | null;
 }
+
+const pendingWorkerCallbacks = new Map<string, {
+  resolve: (theme: ThemeColors | null) => void;
+  reject: (error: Error) => void;
+}>();
+
+async function initWorkerListeners(): Promise<void> {
+  const w = await getWorker();
+  w.onmessage = (e: MessageEvent<WorkerResponse>) => {
+    const { url, theme } = e.data;
+    const callbacks = pendingWorkerCallbacks.get(url);
+    if (callbacks) {
+      pendingWorkerCallbacks.delete(url);
+      callbacks.resolve(theme);
+    }
+  };
+  w.onerror = (error) => {
+    console.error('[ThemeColor] Worker error:', error);
+    pendingWorkerCallbacks.forEach(cb => cb.reject(new Error('Worker error')));
+    pendingWorkerCallbacks.clear();
+  };
+}
+
+let listenersInitialized = false;
 
 export function useThemeColor() {
   const extractColorFromImage = async (imageUrl: string): Promise<ThemeColors | null> => {
@@ -101,79 +99,31 @@ export function useThemeColor() {
           return null;
         }
 
-        // Use smaller size for performance while maintaining accuracy
         const size = 128;
         canvas.width = size;
         canvas.height = size;
         ctx.drawImage(img, 0, 0, size, size);
 
         const imageData = ctx.getImageData(0, 0, size, size);
-        const pixels = imageData.data;
 
-        // Build pixel array for quantizer (filter out transparent and near-gray pixels)
-        const pixelArray: number[] = [];
-        for (let i = 0; i < pixels.length; i += 4) {
-          const r = pixels[i];
-          const g = pixels[i + 1];
-          const b = pixels[i + 2];
-          const a = pixels[i + 3];
-
-          // Skip transparent pixels
-          if (a < 128) continue;
-
-          // Skip near-gray pixels (low saturation)
-          const max = Math.max(r, g, b);
-          const min = Math.min(r, g, b);
-          if (max - min < 10) continue;
-
-          pixelArray.push((r << 16) | (g << 8) | b);
+        if (!listenersInitialized) {
+          await initWorkerListeners();
+          listenersInitialized = true;
         }
 
-        if (pixelArray.length === 0) {
-          return null;
+        const w = await getWorker();
+
+        const resultPromise = new Promise<ThemeColors | null>((resolve, reject) => {
+          pendingWorkerCallbacks.set(imageUrl, { resolve, reject });
+          w.postMessage({ type: 'extract', imageData, url: imageUrl }, [imageData.data.buffer]);
+        });
+
+        const theme = await resultPromise;
+
+        if (theme) {
+          colorCache.set(imageUrl, theme);
         }
 
-        // Use MD3 QuantizerCelebi to extract color clusters
-        const resultMap = QuantizerCelebi.quantize(pixelArray, 128);
-
-        if (resultMap.size === 0) {
-          return null;
-        }
-
-        // Use MD3 Score to find the best source color
-        const scoredColors = Score.score(resultMap);
-        if (scoredColors.length === 0) {
-          return null;
-        }
-
-        const sourceColorArgb = scoredColors[0];
-        const sourceHct = Hct.fromInt(sourceColorArgb);
-
-        // Create tonal palette from source color
-        const palette = TonalPalette.fromHct(sourceHct);
-
-        // MD3 tonal palette: 0-100 tone scale
-        // Primary: tone 40 (main color)
-        // On Primary: tone 100 (text on primary)
-        // Primary Container: tone 90
-        // On Primary Container: tone 10
-        // We use tone 40 for primary, tone 30 for dark variant, tone 50 for light variant
-        const primaryHct = palette.getHct(40);
-        const primaryDarkHct = palette.getHct(30);
-        const primaryLightHct = palette.getHct(50);
-
-        const [r, g, b] = hctToRgb(primaryHct);
-        const [rDark, gDark, bDark] = hctToRgb(primaryDarkHct);
-        const [rLight, gLight, bLight] = hctToRgb(primaryLightHct);
-
-        const theme: ThemeColors = {
-          primary: rgbToHex(r, g, b),
-          primaryDark: rgbToHex(rDark, gDark, bDark),
-          primaryLight: rgbToHex(rLight, gLight, bLight),
-          rgb: [r, g, b],
-        };
-
-        colorCache.set(imageUrl, theme);
         return theme;
       } catch (error) {
         console.error('Failed to extract color:', error);

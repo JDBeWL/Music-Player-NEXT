@@ -1,68 +1,66 @@
 import type { AudioTrack, PlaybackState } from '@/types';
+import { ProgressTracker } from './ProgressTracker';
 
 type StateChangeCallback = (state: PlaybackState) => void;
-type ProgressCallback = (currentTime: number, duration: number) => void;
 type TrackEndCallback = () => void;
 
-/**
- * 原生音频播放器 - 使用 HTML5 Audio 元素流式播放
- * 支持浏览器原生格式：mp3, flac, wav, ogg, m4a, aac
- */
 export class NativeAudioPlayer {
   private audio: HTMLAudioElement;
+  private preloadAudio: HTMLAudioElement | null = null;
   private state: PlaybackState = 'idle';
   private currentTrack: AudioTrack | null = null;
-  private progressInterval: number | null = null;
+  private preloadedTrack: AudioTrack | null = null;
+  private _stopping = false;
 
   private stateListeners: Set<StateChangeCallback> = new Set();
-  private progressListeners: Set<ProgressCallback> = new Set();
   private trackEndListeners: Set<TrackEndCallback> = new Set();
+  private progressTracker: ProgressTracker;
 
   constructor() {
     this.audio = new Audio();
     this.audio.volume = 0.5;
+
+    this.progressTracker = new ProgressTracker(
+      () => this.audio.currentTime,
+      () => this.audio.duration || 0,
+      () => {
+        if (this.state === 'playing') {
+          this.progressTracker.startTracking();
+        }
+      }
+    );
+
     this.setupEventListeners();
   }
 
   private setupEventListeners(): void {
     this.audio.addEventListener('loadstart', () => {
-      console.log('[NativePlayer] Load start');
       this.setState('loading');
     });
 
-    this.audio.addEventListener('canplay', () => {
-      console.log('[NativePlayer] Can play');
-    });
-
     this.audio.addEventListener('playing', () => {
-      console.log('[NativePlayer] Playing');
       this.setState('playing');
-      this.startProgressTracking();
+      this.progressTracker.startTracking();
     });
 
     this.audio.addEventListener('pause', () => {
-      console.log('[NativePlayer] Paused');
+      if (this._stopping) return;
       if (this.state === 'playing') {
         this.setState('paused');
       }
-      this.stopProgressTracking();
+      this.progressTracker.stopTracking();
     });
 
     this.audio.addEventListener('ended', () => {
-      console.log('[NativePlayer] Ended');
       this.setState('idle');
-      this.stopProgressTracking();
-      this.trackEndListeners.forEach(cb => cb());
+      this.progressTracker.stopTracking();
+      [...this.trackEndListeners].forEach(cb => cb());
     });
 
     this.audio.addEventListener('error', (e) => {
       console.error('[NativePlayer] Error:', e);
       this.setState('error');
-      this.stopProgressTracking();
-    });
-
-    this.audio.addEventListener('timeupdate', () => {
-      // 实时更新由 progressInterval 处理
+      this.progressTracker.stopTracking();
     });
   }
 
@@ -115,8 +113,6 @@ export class NativeAudioPlayer {
   }
 
   private async loadInternal(track: AudioTrack, fileUrl: string, autoPlay: boolean): Promise<void> {
-    console.log(`[NativePlayer] Loading track${autoPlay ? ' and playing' : ' (no play)'}:`, track.title, fileUrl);
-
     this.stop();
     this.currentTrack = track;
     this.setState('loading');
@@ -129,16 +125,14 @@ export class NativeAudioPlayer {
 
       if (autoPlay) {
         await this.audio.play();
-        console.log('[NativePlayer] Playing started');
         return;
       }
 
       await this.waitForDuration();
 
-      this.progressListeners.forEach(cb => cb(0, this.audio.duration || 0));
+      this.progressTracker.notifyProgress(0, this.audio.duration || 0);
 
       this.setState('paused');
-      console.log('[NativePlayer] Track loaded, ready to play, duration:', this.audio.duration);
     } catch (error) {
       console.error('[NativePlayer] Failed to load:', error);
       this.setState('error');
@@ -168,11 +162,13 @@ export class NativeAudioPlayer {
   }
 
   stop(): void {
+    this._stopping = true;
     this.audio.pause();
     this.audio.currentTime = 0;
     this.audio.src = '';
-    this.stopProgressTracking();
+    this.progressTracker.stopTracking();
     this.setState('idle');
+    this._stopping = false;
   }
 
   seek(time: number): void {
@@ -204,9 +200,8 @@ export class NativeAudioPlayer {
     return () => this.stateListeners.delete(callback);
   }
 
-  onProgress(callback: ProgressCallback): () => void {
-    this.progressListeners.add(callback);
-    return () => this.progressListeners.delete(callback);
+  onProgress(callback: (currentTime: number, duration: number) => void): () => void {
+    return this.progressTracker.onProgress(callback);
   }
 
   onTrackEnd(callback: TrackEndCallback): () => void {
@@ -216,30 +211,39 @@ export class NativeAudioPlayer {
 
   private setState(newState: PlaybackState): void {
     this.state = newState;
-    this.stateListeners.forEach(cb => cb(newState));
+    [...this.stateListeners].forEach(cb => cb(newState));
   }
 
-  private startProgressTracking(): void {
-    this.stopProgressTracking();
-    this.progressInterval = window.setInterval(() => {
-      this.progressListeners.forEach(cb => {
-        cb(this.audio.currentTime, this.audio.duration || 0);
-      });
-    }, 100);
+  preloadTrack(track: AudioTrack, fileUrl: string): void {
+    if (this.preloadedTrack?.id === track.id) return;
+
+    this.clearPreload();
+
+    this.preloadAudio = new Audio();
+    this.preloadAudio.preload = 'auto';
+    this.preloadAudio.src = fileUrl;
+    this.preloadAudio.load();
+    this.preloadedTrack = track;
   }
 
-  private stopProgressTracking(): void {
-    if (this.progressInterval !== null) {
-      clearInterval(this.progressInterval);
-      this.progressInterval = null;
+  getPreloadedTrack(): AudioTrack | null {
+    return this.preloadedTrack;
+  }
+
+  clearPreload(): void {
+    if (this.preloadAudio) {
+      this.preloadAudio.pause();
+      this.preloadAudio.src = '';
+      this.preloadAudio = null;
     }
+    this.preloadedTrack = null;
   }
 
   destroy(): void {
     this.stop();
+    this.clearPreload();
+    this.progressTracker.destroy();
     this.stateListeners.clear();
-    this.progressListeners.clear();
     this.trackEndListeners.clear();
   }
 }
-

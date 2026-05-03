@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 import {
   getQrKey,
   createQrCode,
@@ -12,9 +13,6 @@ import type {
   NeteaseQrCheckResult,
 } from '@/services/netease/types';
 
-const NETEASE_COOKIE_KEY = 'netease_cloud_cookie';
-const NETEASE_PROFILE_KEY = 'netease_cloud_profile';
-
 export const useNeteaseAuthStore = defineStore('neteaseAuth', () => {
   const cookie = ref<string>('');
   const userProfile = ref<NeteaseUserProfile | null>(null);
@@ -26,24 +24,27 @@ export const useNeteaseAuthStore = defineStore('neteaseAuth', () => {
   const isQrLoading = ref(false);
   const qrCheckTimer = ref<ReturnType<typeof setInterval> | null>(null);
 
-  function saveLoginState() {
+  async function saveLoginState() {
     try {
-      if (cookie.value) {
-        localStorage.setItem(NETEASE_COOKIE_KEY, cookie.value);
-      }
-      if (userProfile.value) {
-        localStorage.setItem(NETEASE_PROFILE_KEY, JSON.stringify(userProfile.value));
+      if (cookie.value && userProfile.value) {
+        await invoke('save_netease_auth', {
+          cookie: cookie.value,
+          profile: JSON.stringify(userProfile.value),
+        });
       }
     } catch (error) {
       console.warn('[NeteaseAuthStore] Failed to save login state:', error);
     }
   }
 
-  function clearLoginState() {
+  async function clearLoginState() {
     cookie.value = '';
     userProfile.value = null;
-    localStorage.removeItem(NETEASE_COOKIE_KEY);
-    localStorage.removeItem(NETEASE_PROFILE_KEY);
+    try {
+      await invoke('clear_netease_auth');
+    } catch (error) {
+      console.warn('[NeteaseAuthStore] Failed to clear login state:', error);
+    }
   }
 
   async function startQrLogin() {
@@ -132,13 +133,17 @@ export const useNeteaseAuthStore = defineStore('neteaseAuth', () => {
 
   async function init() {
     try {
-      const savedCookie = localStorage.getItem(NETEASE_COOKIE_KEY);
-      const savedProfile = localStorage.getItem(NETEASE_PROFILE_KEY);
-      if (savedCookie) {
-        cookie.value = savedCookie;
-      }
-      if (savedProfile) {
-        userProfile.value = JSON.parse(savedProfile);
+      const result = await invoke<string | null>('load_netease_auth');
+      if (result) {
+        const parsed = JSON.parse(result);
+        if (parsed.cookie) {
+          cookie.value = parsed.cookie;
+        }
+        if (parsed.profile) {
+          userProfile.value = typeof parsed.profile === 'string'
+            ? JSON.parse(parsed.profile)
+            : parsed.profile;
+        }
       }
     } catch (error) {
       console.warn('[NeteaseAuthStore] Failed to restore state:', error);

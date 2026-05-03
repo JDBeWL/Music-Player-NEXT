@@ -5,6 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/stores/configStore';
+import { LRUCache } from '@/utils/lruCache';
 import type {
   NeteaseSearchResponse,
   NeteaseSongUrlResponse,
@@ -15,7 +16,12 @@ import type {
   NeteaseLoginStatus,
 } from './types';
 
-const _cache = new Map<string, { data: unknown; ts: number }>();
+interface CacheEntry {
+  data: unknown;
+  ts: number;
+}
+
+const _cache = new LRUCache<string, CacheEntry>(200);
 const _CACHE_TTL = 60_000;
 const _pending = new Map<string, Promise<unknown>>();
 
@@ -39,17 +45,6 @@ function _getCached<T>(key: string): T | null {
 
 function _setCache(key: string, data: unknown): void {
   _cache.set(key, { data, ts: Date.now() });
-  if (_cache.size > 200) {
-    let oldest: string | null = null;
-    let oldestTs = Infinity;
-    for (const [k, v] of _cache) {
-      if (v.ts < oldestTs) {
-        oldestTs = v.ts;
-        oldest = k;
-      }
-    }
-    if (oldest) _cache.delete(oldest);
-  }
 }
 
 /**

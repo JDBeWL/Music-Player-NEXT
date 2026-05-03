@@ -20,8 +20,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: 'confirm', value: string): void;
-  (e: 'cancel'): void;
+  confirm: [value: string];
+  cancel: [];
 }>();
 
 const inputValue = ref('');

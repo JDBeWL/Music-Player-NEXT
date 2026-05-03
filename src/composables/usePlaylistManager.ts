@@ -1,11 +1,11 @@
 import { ref } from 'vue';
 import { usePlaylistStore } from '@/stores/playlistStore';
-import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 
 export function usePlaylistManager() {
   const playlistStore = usePlaylistStore();
-  const playbackStore = usePlaybackStore();
+  const queueStore = useQueueStore();
   const libraryStore = useLibraryStore();
 
   const showPlaylistDialog = ref(false);
@@ -20,20 +20,20 @@ export function usePlaylistManager() {
   async function handleCreatePlaylist(name: string) {
     playlistStore.createPlaylist(name);
     showCreatePrompt.value = false;
-    await libraryStore.persistLibrary();
+    await libraryStore.persistLibrary(playlistStore.playlists);
   }
 
   function playPlaylist(id: string) {
     const playlist = playlistStore.playlists.find(p => p.id === id);
     if (playlist) {
-      playbackStore.loadPlaylistToQueue(playlist.tracks, id);
+      queueStore.loadPlaylistToQueue(playlist.tracks, id);
     }
   }
 
   function playTrackFromPlaylist(playlistId: string, trackId: string) {
     const playlist = playlistStore.playlists.find(p => p.id === playlistId);
     if (playlist) {
-      playbackStore.playTrackFromPlaylist(playlist.tracks, playlistId, trackId);
+      queueStore.playTrackFromPlaylist(playlist.tracks, playlistId, trackId);
       playlistStore.currentPlaylistId = playlistId;
     }
   }
@@ -42,21 +42,21 @@ export function usePlaylistManager() {
     const currentPlaylistId = playlistStore.currentPlaylistId;
     if (!currentPlaylistId) return;
     playlistStore.updatePlaylistDescription(currentPlaylistId, description);
-    await libraryStore.persistLibrary();
+    await libraryStore.persistLibrary(playlistStore.playlists);
   }
 
   async function removeTrackFromPlaylist(trackId: string) {
     const currentPlaylistId = playlistStore.currentPlaylistId;
     if (!currentPlaylistId) return;
     playlistStore.removeFromPlaylist(currentPlaylistId, trackId);
-    await libraryStore.persistLibrary();
+    await libraryStore.persistLibrary(playlistStore.playlists);
   }
 
   async function reorderTracksInPlaylist(fromIndex: number, toIndex: number) {
     const currentPlaylistId = playlistStore.currentPlaylistId;
     if (!currentPlaylistId) return;
     playlistStore.reorderPlaylistTracks(currentPlaylistId, fromIndex, toIndex);
-    await libraryStore.persistLibrary();
+    await libraryStore.persistLibrary(playlistStore.playlists);
   }
 
   function requestDeletePlaylist(playlistId: string) {
@@ -74,7 +74,7 @@ export function usePlaylistManager() {
         closePlaylistDetail();
       }
       playlistStore.deletePlaylist(playlistIdToDelete);
-      await libraryStore.persistLibrary();
+      await libraryStore.persistLibrary(playlistStore.playlists);
     }
   }
 
@@ -92,7 +92,7 @@ export function usePlaylistManager() {
     libraryStore.deselectAllFiles();
     libraryStore.isLocalBrowserOpen = false;
     showPlaylistDialog.value = false;
-    await libraryStore.persistLibrary();
+    await libraryStore.persistLibrary(playlistStore.playlists);
   }
 
   return {

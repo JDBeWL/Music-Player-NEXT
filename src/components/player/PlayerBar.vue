@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from 'vue';
+import { computed, ref, onBeforeUnmount } from 'vue';
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'radix-vue';
 import { formatTime } from '@/utils/format';
 import {
@@ -16,37 +16,41 @@ import {
   Shuffle,
   Music,
   Heart,
+  AlertCircle,
 } from 'lucide-vue-next';
+import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
+import { useTrackActions } from '@/composables/useTrackActions';
+
+const playbackStore = usePlaybackStore();
+const queueStore = useQueueStore();
+const { isTrackFavorite, toggleFavorite } = useTrackActions();
 
 interface Props {
-  currentTrack: any;
-  isPlaying: boolean;
-  currentTime: number;
-  duration: number;
-  volume: number;
-  isShuffle: boolean;
-  repeatMode: 'none' | 'one' | 'all';
   showQueuePanel: boolean;
   showNowPlayingPanel: boolean;
-  coverUrl?: string;
-  isFavorite: boolean;
-}
-
-interface Emits {
-  (e: 'toggle-play'): void;
-  (e: 'play-next'): void;
-  (e: 'play-prev'): void;
-  (e: 'time-change', value: number): void;
-  (e: 'volume-change', value: number): void;
-  (e: 'toggle-shuffle'): void;
-  (e: 'cycle-repeat'): void;
-  (e: 'toggle-queue'): void;
-  (e: 'toggle-now-playing'): void;
-  (e: 'toggle-favorite'): void;
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
+
+const emit = defineEmits<{
+  'toggle-queue': [];
+  'toggle-now-playing': [];
+}>();
+
+const currentTrack = computed(() => playbackStore.currentTrack);
+const isPlaying = computed(() => playbackStore.isPlaying);
+const currentTime = computed(() => playbackStore.currentTime);
+const duration = computed(() => playbackStore.duration);
+const volume = computed(() => playbackStore.volume);
+const isShuffle = computed(() => queueStore.isShuffle);
+const repeatMode = computed(() => queueStore.repeatMode);
+const coverUrl = computed(() => playbackStore.currentCoverUrl);
+const isFavorite = computed(() => {
+  if (!currentTrack.value) return false;
+  return isTrackFavorite(currentTrack.value.path);
+});
+const errorMessage = computed(() => playbackStore.errorMessage);
 
 const showVolumeSlider = ref(false);
 let volumeHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,90 +70,51 @@ function onVolumeMouseLeave() {
 }
 
 const isDragging = ref(false);
+const hasDragged = ref(false);
 const dragProgress = ref(0);
 const previousVolume = ref(0.5);
 const progressTrackRef = ref<HTMLElement | null>(null);
 const isHovering = ref(false);
 
-const smoothTime = ref(0);
-let lastStoreTime = 0;
-let lastStoreTimestamp = 0;
-let rafId: number | null = null;
-
-watch(() => props.currentTime, (newTime) => {
-  lastStoreTime = newTime;
-  lastStoreTimestamp = performance.now();
-  smoothTime.value = newTime;
-});
-
-watch(() => props.isPlaying, (playing) => {
-  if (playing) {
-    lastStoreTimestamp = performance.now();
-    startSmoothLoop();
-  } else {
-    stopSmoothLoop();
-  }
-}, { immediate: true });
-
-function startSmoothLoop() {
-  if (rafId !== null) return;
-  function tick() {
-    const now = performance.now();
-    const elapsed = (now - lastStoreTimestamp) / 1000;
-    smoothTime.value = Math.min(lastStoreTime + elapsed, props.duration || Infinity);
-    rafId = requestAnimationFrame(tick);
-  }
-  rafId = requestAnimationFrame(tick);
-}
-
-function stopSmoothLoop() {
-  if (rafId !== null) {
-    cancelAnimationFrame(rafId);
-    rafId = null;
-  }
-}
-
 const progress = computed(() => {
   if (isDragging.value) return dragProgress.value;
-  if (!props.duration) return 0;
-  return (smoothTime.value / props.duration) * 100;
+  if (!duration.value) return 0;
+  return (currentTime.value / duration.value) * 100;
 });
 
 const displayTime = computed(() => {
   if (isDragging.value) {
-    return (dragProgress.value / 100) * props.duration;
+    return (dragProgress.value / 100) * duration.value;
   }
-  return smoothTime.value;
+  return currentTime.value;
 });
 
 const VolumeIcon = computed(() => {
-  const vol = props.volume;
+  const vol = volume.value;
   if (vol === 0) return VolumeX;
   if (vol < 0.5) return Volume1;
   return Volume2;
 });
 
 const RepeatIcon = computed(() => {
-  return props.repeatMode === 'one' ? Repeat1 : Repeat;
+  return repeatMode.value === 'one' ? Repeat1 : Repeat;
 });
 
-const trackTitle = computed(() => props.currentTrack?.title || '未选择歌曲');
-const artistName = computed(() => props.currentTrack?.artist || '未知艺术家');
-
-// 图标组件已直接导入，无需额外映射
+const trackTitle = computed(() => currentTrack.value?.title || '未选择歌曲');
+const artistName = computed(() => currentTrack.value?.artist || '未知艺术家');
 
 function handleVolumeChange(value: number[] | undefined) {
   if (value && value.length > 0) {
-    emit('volume-change', value[0]);
+    playbackStore.setVolume(value[0]);
   }
 }
 
 function toggleMute() {
-  if (props.volume > 0) {
-    previousVolume.value = props.volume;
-    emit('volume-change', 0);
+  if (volume.value > 0) {
+    previousVolume.value = volume.value;
+    playbackStore.setVolume(0);
   } else {
-    emit('volume-change', previousVolume.value);
+    playbackStore.setVolume(previousVolume.value);
   }
 }
 
@@ -159,61 +124,41 @@ function updateProgress(e: MouseEvent) {
   const rect = progressTrackRef.value.getBoundingClientRect();
   const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
   dragProgress.value = percent;
-
-  if (isDragging.value) {
-    emit('time-change', (percent / 100) * props.duration);
-  }
 }
 
 function handleDocumentMouseMove(e: MouseEvent) {
   if (isDragging.value) {
+    hasDragged.value = true;
     updateProgress(e);
   }
 }
 
 function handleMouseUp() {
-  if (isDragging.value) {
-    isDragging.value = false;
-    document.removeEventListener('mousemove', handleDocumentMouseMove);
-    document.removeEventListener('mouseup', handleMouseUp);
-  }
+  if (!isDragging.value) return;
+
+  playbackStore.setCurrentTime((dragProgress.value / 100) * duration.value);
+
+  isDragging.value = false;
+  hasDragged.value = false;
+  document.removeEventListener('mousemove', handleDocumentMouseMove);
+  document.removeEventListener('mouseup', handleMouseUp);
 }
 
 function handleMouseDown(e: MouseEvent) {
   isDragging.value = true;
+  hasDragged.value = false;
   updateProgress(e);
 
   document.addEventListener('mousemove', handleDocumentMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
 }
 
-function handleSeek(e: MouseEvent) {
-  if (isDragging.value) return;
-
-  const target = e.currentTarget as HTMLElement;
-  const rect = target.getBoundingClientRect();
-  const percent = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-
-  // 立即更新视觉反馈
-  dragProgress.value = percent;
-  isDragging.value = true;
-
-  emit('time-change', (percent / 100) * props.duration);
-
-  // 短暂延迟后恢复正常状态，让视觉更新生效
-  setTimeout(() => {
-    isDragging.value = false;
-  }, 100);
-}
-
-// 清理事件监听器
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', handleDocumentMouseMove);
   document.removeEventListener('mouseup', handleMouseUp);
   if (volumeHideTimer) {
     clearTimeout(volumeHideTimer);
   }
-  stopSmoothLoop();
 });
 </script>
 
@@ -227,9 +172,8 @@ onBeforeUnmount(() => {
       @mouseenter="isHovering = true"
       @mouseleave="isHovering = false"
       @mousedown="handleMouseDown"
-      @click="handleSeek"
-      @keydown.left.prevent="emit('time-change', Math.max(0, currentTime - 5))"
-      @keydown.right.prevent="emit('time-change', Math.min(duration, currentTime + 5))"
+      @keydown.left.prevent="playbackStore.setCurrentTime(Math.max(0, currentTime - 5))"
+      @keydown.right.prevent="playbackStore.setCurrentTime(Math.min(duration, currentTime + 5))"
       role="slider"
       :aria-label="'播放进度'"
       :aria-valuenow="Math.round(currentTime)"
@@ -270,7 +214,11 @@ onBeforeUnmount(() => {
           </div>
           <div class="flex flex-col min-w-0 flex-1">
             <span class="text-sm font-medium text-[var(--text-primary)] truncate">{{ trackTitle }}</span>
-            <span class="text-xs text-[var(--text-tertiary)] truncate">{{ artistName }}</span>
+            <span v-if="errorMessage" class="text-xs text-red-400 truncate flex items-center gap-1">
+              <AlertCircle :size="12" class="flex-shrink-0" />
+              {{ errorMessage }}
+            </span>
+            <span v-else class="text-xs text-[var(--text-tertiary)] truncate">{{ artistName }}</span>
           </div>
         </div>
         <span v-else class="text-sm text-[var(--text-disabled)] ml-4">未在播放</span>
@@ -281,7 +229,7 @@ onBeforeUnmount(() => {
             class="md3-icon-btn-xs state-layer"
             :class="{ 'text-[var(--color-primary)]': isShuffle }"
             aria-label="随机播放"
-            @click="emit('toggle-shuffle')"
+            @click="queueStore.toggleShuffle()"
           >
             <Shuffle :size="18" />
           </button>
@@ -289,24 +237,24 @@ onBeforeUnmount(() => {
           <button
             class="md3-icon-btn-sm state-layer"
             aria-label="上一首"
-            @click="emit('play-prev')"
+            @click="queueStore.playPrev()"
           >
             <SkipBack :size="20" />
           </button>
 
           <button
-            class="play-btn w-11 h-11 flex items-center justify-center rounded-xl bg-[var(--color-primary)] hover:brightness-110 transition-all text-[var(--text-on-primary)]"
+            class="play-btn w-11 h-11 flex items-center justify-center rounded-full bg-[var(--color-primary)] hover:brightness-110 transition-all text-[var(--text-on-primary)]"
             :aria-label="isPlaying ? '暂停' : '播放'"
-            @click="emit('toggle-play')"
+            @click="queueStore.togglePlay()"
           >
             <Pause v-if="isPlaying" :size="24" />
-            <Play v-else :size="24" class="ml-0.5" />
+            <Play v-else :size="24"/>
           </button>
 
           <button
             class="md3-icon-btn-sm state-layer"
             aria-label="下一首"
-            @click="emit('play-next')"
+            @click="queueStore.playNext()"
           >
             <SkipForward :size="20" />
           </button>
@@ -315,7 +263,7 @@ onBeforeUnmount(() => {
             class="md3-icon-btn-xs state-layer"
             :class="{ 'text-[var(--color-primary)]': repeatMode !== 'none' }"
             aria-label="循环模式"
-            @click="emit('cycle-repeat')"
+            @click="queueStore.cycleRepeatMode()"
           >
             <component :is="RepeatIcon" :size="18" />
           </button>
@@ -327,7 +275,7 @@ onBeforeUnmount(() => {
           :class="{ 'text-red-400': isFavorite }"
           :disabled="!currentTrack"
           aria-label="喜欢"
-          @click="emit('toggle-favorite')"
+          @click="currentTrack && toggleFavorite(currentTrack)"
         >
           <Heart :size="18" :fill="isFavorite ? 'currentColor' : 'none'" />
         </button>
@@ -395,11 +343,6 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
 }
 
-.no-select {
-  user-select: none;
-  -webkit-user-select: none;
-}
-
 .play-btn svg {
   width: 24px;
   height: 24px;
@@ -425,7 +368,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 3px;
   background: var(--border-default);
-  transition: height 0.15s ease;
+  transition: height 0.15s ease, margin-top 0.15s ease;
   overflow: hidden;
 }
 
@@ -449,19 +392,14 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   opacity: 0;
-  transition: opacity 0.15s ease, top 0.15s ease;
+  transition: opacity 0.15s ease;
   pointer-events: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-}
-
-.progress-bar-container.is-dragging .progress-thumb {
-  transition: opacity 0.15s ease, top 0.15s ease;
 }
 
 .progress-bar-container:hover .progress-thumb,
 .progress-bar-container.is-dragging .progress-thumb {
   opacity: 1;
-  top: 1.5px;
 }
 
 .progress-tooltip {

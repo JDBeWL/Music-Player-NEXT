@@ -67,7 +67,10 @@ pub fn run() {
             netease::netease::set_netease_api_base,
             netease::netease::get_netease_api_base,
             netease::netease::download_netease_song,
-            netease::netease::save_file_dialog
+            netease::netease::save_file_dialog,
+            netease::netease::save_netease_auth,
+            netease::netease::load_netease_auth,
+            netease::netease::clear_netease_auth
         ])
         .setup(|app| {
             let settings_path = domain::utils::get_settings_path();

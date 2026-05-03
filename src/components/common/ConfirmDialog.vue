@@ -18,8 +18,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: 'confirm'): void;
-  (e: 'cancel'): void;
+  confirm: [];
+  cancel: [];
 }>();
 
 function handleConfirm() {

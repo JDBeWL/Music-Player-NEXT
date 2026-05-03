@@ -1,32 +1,24 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ChevronDown, Music } from 'lucide-vue-next';
+import ErrorBoundary from '@/components/common/ErrorBoundary.vue';
 import LyricsDisplay from '@/components/player/LyricsDisplay.vue';
 import { getCoverUrl } from '@/utils/coverUrl';
 
-interface Track {
-  id: string;
-  title: string;
-  artist: string;
-  album?: string;
-  duration: number;
-  coverUrl?: string;
-  lrc?: string;
-}
+import type { AudioTrack } from '@/types';
 
 interface Props {
-  currentTrack: Track | null;
+  currentTrack: AudioTrack | null;
   currentTime: number;
   modelValue: boolean;
 }
 
-interface Emits {
-  (e: 'update:modelValue', value: boolean): void;
-  (e: 'seek', time: number): void;
-}
-
 const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
+
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean];
+  'seek': [time: number];
+}>();
 
 const playerBarHeight = ref(96);
 let resizeObserver: ResizeObserver | null = null;
@@ -48,6 +40,14 @@ onUnmounted(() => {
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
+  }
+  if (activeMouseMove) {
+    window.removeEventListener('mousemove', activeMouseMove);
+    activeMouseMove = null;
+  }
+  if (activeMouseUp) {
+    window.removeEventListener('mouseup', activeMouseUp);
+    activeMouseUp = null;
   }
 });
 
@@ -96,6 +96,8 @@ watch(() => props.modelValue, (val) => {
 let startY = 0;
 let currentY = 0;
 let dragStarted = false;
+let activeMouseMove: ((ev: MouseEvent) => void) | null = null;
+let activeMouseUp: (() => void) | null = null;
 
 function onDragStart(clientY: number) {
   startY = clientY;
@@ -152,7 +154,12 @@ function onMouseDown(e: MouseEvent) {
     onDragEnd();
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);
+    activeMouseMove = null;
+    activeMouseUp = null;
   };
+
+  activeMouseMove = onMouseMove;
+  activeMouseUp = onMouseUp;
 
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('mouseup', onMouseUp);
@@ -242,7 +249,9 @@ function onWheel(e: WheelEvent) {
           </div>
 
           <div class="overflow-hidden" style="flex: 0 0 60%; max-width: 60%; padding: 0 0 0 2%; box-sizing: border-box;">
-            <LyricsDisplay @seek="emit('seek', $event)" />
+            <ErrorBoundary>
+              <LyricsDisplay @seek="emit('seek', $event)" />
+            </ErrorBoundary>
           </div>
         </div>
 

@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
+export default defineConfig(async ({ command }) => ({
   plugins: [vue()],
 
   resolve: {
@@ -16,8 +16,12 @@ export default defineConfig(async () => ({
     },
   },
 
+  css: {
+    devSourcemap: command === 'serve',
+  },
+
   build: {
-    target: "esnext",
+    target: ["es2022", "chrome100", "safari15"],
     minify: "esbuild",
     cssMinify: true,
     rollupOptions: {
@@ -47,6 +51,12 @@ export default defineConfig(async () => ({
     },
     sourcemap: false,
     reportCompressedSize: false,
+    chunkSizeWarningLimit: 600,
+    emptyOutDir: true,
+  },
+
+  esbuild: {
+    drop: command === 'build' ? ['console', 'debugger'] : [],
   },
 
   clearScreen: false,
@@ -71,5 +81,6 @@ export default defineConfig(async () => ({
   },
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core'],
+    include: ['vue', 'vue-router', 'pinia', '@vueuse/core'],
   },
 }));

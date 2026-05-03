@@ -1,13 +1,15 @@
 import { computed } from 'vue';
 import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
-import { useLibraryStore } from '@/stores/libraryStore';
-import type { AudioTrack, RepeatMode } from '@/types';
+import { useTrackActions } from '@/composables/useTrackActions';
+import type { AudioTrack } from '@/types';
 
 export function usePlayerControls() {
   const playbackStore = usePlaybackStore();
+  const queueStore = useQueueStore();
   const playlistStore = usePlaylistStore();
-  const libraryStore = useLibraryStore();
+  const { toggleFavorite: toggleFavoriteAction } = useTrackActions();
 
   const isCurrentTrackFavorite = computed(() => {
     if (!playbackStore.currentTrack) return false;
@@ -25,61 +27,20 @@ export function usePlayerControls() {
   });
 
   function handlePlayNext() {
-    const queue = playbackStore.queue;
-    if (queue.length === 0) return;
-
-    if (playbackStore.isShuffle) {
-      const currentIdx = playbackStore.currentIndex;
-      if (queue.length === 1) return;
-      let randomIndex;
-      do {
-        randomIndex = Math.floor(Math.random() * queue.length);
-      } while (randomIndex === currentIdx);
-      playbackStore.playTrack(randomIndex);
-      return;
-    }
-
-    if (playbackStore.repeatMode === 'one') {
-      playbackStore.playTrack(playbackStore.currentIndex);
-      return;
-    }
-
-    const nextIndex = playbackStore.currentIndex + 1;
-    if (nextIndex >= queue.length) {
-      if (playbackStore.repeatMode === 'all') {
-        playbackStore.playTrack(0);
-      }
-      return;
-    }
-
-    playbackStore.playTrack(nextIndex);
-  }
-
-  function cycleRepeatMode() {
-    const modes: Array<RepeatMode> = ['all', 'one', 'none'];
-    const currentIdx = modes.indexOf(playbackStore.repeatMode);
-    playbackStore.repeatMode = modes[(currentIdx + 1) % modes.length];
-    playbackStore.savePlaybackModeSettings();
-  }
-
-  function toggleShuffle() {
-    playbackStore.isShuffle = !playbackStore.isShuffle;
-    playbackStore.savePlaybackModeSettings();
+    queueStore.playNext();
   }
 
   async function toggleFavorite() {
     if (!playbackStore.currentTrack) return;
-    playlistStore.toggleFavorite(playbackStore.currentTrack);
-    await libraryStore.persistLibrary();
+    await toggleFavoriteAction(playbackStore.currentTrack);
   }
 
   async function toggleTrackFavorite(track: AudioTrack) {
-    playlistStore.toggleFavorite(track);
-    await libraryStore.persistLibrary();
+    await toggleFavoriteAction(track);
   }
 
   function playSearchAsNext(track: AudioTrack) {
-    playbackStore.insertAndPlayNext(track);
+    queueStore.insertAndPlayNext(track);
   }
 
   return {
@@ -87,8 +48,6 @@ export function usePlayerControls() {
     playbackStatusLabel,
     favoriteTrackPaths,
     handlePlayNext,
-    cycleRepeatMode,
-    toggleShuffle,
     toggleFavorite,
     toggleTrackFavorite,
     playSearchAsNext,

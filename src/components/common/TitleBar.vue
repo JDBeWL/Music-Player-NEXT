@@ -23,14 +23,13 @@ interface Props {
   canGoForward?: boolean;
 }
 
-interface Emits {
-  (e: 'navigate-back'): void;
-  (e: 'navigate-forward'): void;
-  (e: 'play-next', track: AudioTrack): void;
-}
-
 const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
+
+const emit = defineEmits<{
+  'navigate-back': [];
+  'navigate-forward': [];
+  'play-next': [track: AudioTrack];
+}>();
 
 const appWindow = getCurrentWindow();
 

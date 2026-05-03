@@ -2,31 +2,26 @@
 import { ref } from 'vue';
 import { Music, Folder, Settings, Plus, Trash2, ListMusic, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next';
 
-interface Playlist {
-  id: string;
-  name: string;
-  trackCount: number;
-}
+import type { PlaylistSummary } from '@/types';
 
 interface Props {
   currentView: string;
   currentPlaylistId: string | null;
-  playlists: Playlist[];
-}
-
-interface Emits {
-  (e: 'navigate', view: string): void;
-  (e: 'open-playlist', id: string): void;
-  (e: 'request-create'): void;
-  (e: 'request-delete', id: string): void;
+  playlists: PlaylistSummary[];
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
+
+const emit = defineEmits<{
+  navigate: [view: string];
+  'open-playlist': [id: string];
+  'request-create': [];
+  'request-delete': [id: string];
+}>();
 
 const isCollapsed = ref(false);
 
-function handlePlaylistClick(playlist: Playlist) {
+function handlePlaylistClick(playlist: PlaylistSummary) {
   emit('open-playlist', playlist.id);
 }
 

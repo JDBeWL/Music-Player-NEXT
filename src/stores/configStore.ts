@@ -2,59 +2,48 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { settingsSync } from '@/services/settingsSync';
+import { toast } from '@/services/toast';
+import type { KeyboardShortcut, AppSettings, LyricsDisplayMode, ThemeMode, CloseBehavior } from '@/types';
+
+const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, KeyboardShortcut> = {
+  togglePlay: { code: 'Space', shift: false, ctrl: false, alt: false },
+  navigateBack: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false },
+  navigateForward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false },
+  toggleShuffle: { code: 'KeyS', shift: false, ctrl: false, alt: false },
+  cycleRepeat: { code: 'KeyR', shift: false, ctrl: false, alt: false },
+  playNext: { code: 'ArrowUp', shift: false, ctrl: true, alt: false },
+  playPrev: { code: 'ArrowDown', shift: false, ctrl: true, alt: false },
+};
 
 export const useConfigStore = defineStore('config', () => {
-  const lyricsDisplayMode = ref<'modern' | 'classic'>('modern');
+  const lyricsDisplayMode = ref<LyricsDisplayMode>('modern');
   const showTranslation = ref(true);
   const enableLyricsBlur = ref(true);
-  const themeMode = ref<'dark' | 'light'>('dark');
-  const closeBehavior = ref<'to_tray' | 'quit'>('to_tray');
+  const themeMode = ref<ThemeMode>('dark');
+  const closeBehavior = ref<CloseBehavior>('to_tray');
   const persistPlayback = ref(true);
   const neteaseRealIP = ref<string>('116.25.146.177');
 
-  interface KeyboardShortcut {
-    code: string;
-    shift: boolean;
-    ctrl: boolean;
-    alt: boolean;
-  }
-
-  const keyboardShortcuts = ref<Record<string, KeyboardShortcut>>({
-    togglePlay: { code: 'Space', shift: false, ctrl: false, alt: false },
-    navigateBack: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false },
-    navigateForward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false },
-    toggleShuffle: { code: 'KeyS', shift: false, ctrl: false, alt: false },
-    cycleRepeat: { code: 'KeyR', shift: false, ctrl: false, alt: false },
-    playNext: { code: 'ArrowUp', shift: false, ctrl: true, alt: false },
-    playPrev: { code: 'ArrowDown', shift: false, ctrl: true, alt: false },
-  });
-
-  interface AppSettings {
-    volume: number;
-    lyrics_display_mode: string;
-    show_translation: boolean;
-    enable_lyrics_blur: boolean;
-    theme_mode: string;
-    close_behavior?: string;
-    persist_playback?: boolean;
-    netease_real_ip?: string;
-  }
+  const keyboardShortcuts = ref<Record<string, KeyboardShortcut>>({ ...DEFAULT_KEYBOARD_SHORTCUTS });
 
   async function loadConfig() {
     try {
       const settings = await invoke<AppSettings>('get_settings');
-      lyricsDisplayMode.value = (settings.lyrics_display_mode as 'modern' | 'classic') || 'modern';
+      lyricsDisplayMode.value = settings.lyrics_display_mode || 'modern';
       showTranslation.value = settings.show_translation;
       enableLyricsBlur.value = settings.enable_lyrics_blur;
-      themeMode.value = (settings.theme_mode as 'dark' | 'light') || 'dark';
+      themeMode.value = settings.theme_mode || 'dark';
       if (settings.close_behavior) {
-        closeBehavior.value = (settings.close_behavior as 'to_tray' | 'quit') || 'to_tray';
+        closeBehavior.value = settings.close_behavior || 'to_tray';
       }
       if (settings.persist_playback !== undefined) {
         persistPlayback.value = settings.persist_playback;
       }
       if (settings.netease_real_ip) {
         neteaseRealIP.value = settings.netease_real_ip;
+      }
+      if (settings.keyboard_shortcuts) {
+        keyboardShortcuts.value = settings.keyboard_shortcuts;
       }
     } catch (error) {
       console.error('Failed to load config from Tauri:', error);
@@ -65,7 +54,7 @@ export const useConfigStore = defineStore('config', () => {
           lyricsDisplayMode.value = config.lyricsDisplayMode || 'modern';
           showTranslation.value = config.showTranslation !== false;
           enableLyricsBlur.value = config.enableLyricsBlur !== false;
-          themeMode.value = (config.themeMode as 'dark' | 'light') || 'dark';
+          themeMode.value = (config.themeMode as ThemeMode) || 'dark';
           if (config.keyboardShortcuts) {
             keyboardShortcuts.value = config.keyboardShortcuts;
           }
@@ -84,11 +73,12 @@ export const useConfigStore = defineStore('config', () => {
       enable_lyrics_blur: enableLyricsBlur.value,
       theme_mode: themeMode.value,
       persist_playback: persistPlayback.value,
-      netease_real_ip: neteaseRealIP.value
+      netease_real_ip: neteaseRealIP.value,
+      keyboard_shortcuts: keyboardShortcuts.value
     });
   }
 
-  const setLyricsDisplayMode = async (mode: 'modern' | 'classic') => {
+  const setLyricsDisplayMode = async (mode: LyricsDisplayMode) => {
     lyricsDisplayMode.value = mode;
     await saveConfig();
   };
@@ -117,7 +107,7 @@ export const useConfigStore = defineStore('config', () => {
     await saveConfig();
   };
 
-  const setThemeMode = async (mode: 'dark' | 'light') => {
+  const setThemeMode = async (mode: ThemeMode) => {
     themeMode.value = mode;
     applyTheme();
     await saveConfig();
@@ -128,15 +118,22 @@ export const useConfigStore = defineStore('config', () => {
     await saveConfig();
   };
 
-  const setCloseBehavior = async (behavior: 'to_tray' | 'quit') => {
+  const resetKeyboardShortcuts = async () => {
+    keyboardShortcuts.value = { ...DEFAULT_KEYBOARD_SHORTCUTS };
+    await saveConfig();
+  };
+
+  const setCloseBehavior = async (behavior: CloseBehavior) => {
     try {
       await invoke('set_close_behavior_and_hint', {
         closeBehavior: behavior,
         firstCloseHintShown: true
       });
       closeBehavior.value = behavior;
+      await saveConfig();
     } catch (error) {
       console.error('Failed to set close behavior:', error);
+      toast.error('设置关闭行为失败');
     }
   };
 
@@ -148,6 +145,21 @@ export const useConfigStore = defineStore('config', () => {
   const setNeteaseRealIP = async (ip: string) => {
     neteaseRealIP.value = ip;
     await saveConfig();
+  };
+
+  const testNeteaseConnection = async (): Promise<{ success: boolean; latency?: number; error?: string }> => {
+    const ip = neteaseRealIP.value;
+    const start = performance.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`http://${ip}`, { method: 'HEAD', signal: controller.signal });
+      clearTimeout(timeout);
+      const latency = Math.round(performance.now() - start);
+      return { success: response.ok || response.status === 403, latency };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   };
 
   return {
@@ -165,9 +177,11 @@ export const useConfigStore = defineStore('config', () => {
     toggleTheme,
     setThemeMode,
     setKeyboardShortcut,
+    resetKeyboardShortcuts,
     setCloseBehavior,
     setPersistPlayback,
     setNeteaseRealIP,
+    testNeteaseConnection,
     loadConfig,
     saveConfig
   };

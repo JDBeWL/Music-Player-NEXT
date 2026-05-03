@@ -1,41 +1,36 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useVirtualList } from '@vueuse/core';
 import { X, ListMusic, Music, Heart } from 'lucide-vue-next';
 import { getCoverUrl } from '@/utils/coverUrl';
 import { formatTime } from '@/utils/format';
+import { VIRTUAL_LIST_OVERSCAN } from '@/constants/ui';
+import { useQueueStore } from '@/stores/queueStore';
+import { useTrackActions } from '@/composables/useTrackActions';
 
-interface Track {
-  id: string;
-  title: string;
-  artist: string;
-  duration: number;
-  coverUrl?: string;
-  path: string;
-}
+const QUEUE_ITEM_HEIGHT = 58;
+const QUEUE_ITEM_GAP = 2;
+
+const queueStore = useQueueStore();
+const { isTrackFavorite, toggleFavorite } = useTrackActions();
 
 interface Props {
-  queue: Track[];
-  currentIndex: number;
-  isPlaying: boolean;
   modelValue: boolean;
-  favoritePaths: Set<string>;
-}
-
-interface Emits {
-  (e: 'update:modelValue', value: boolean): void;
-  (e: 'select-track', index: number): void;
-  (e: 'remove-track', index: number): void;
-  (e: 'clear-queue'): void;
-  (e: 'toggle-favorite', track: Track): void;
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
+
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean];
+}>();
 
 const isOpen = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val),
 });
+
+const queue = computed(() => queueStore.queue);
+const currentIndex = computed(() => queueStore.currentIndex);
 
 function closePanel() {
   isOpen.value = false;
@@ -44,6 +39,11 @@ function closePanel() {
 function onOverlayClick() {
   closePanel();
 }
+
+const { list: virtualList, containerProps, wrapperProps } = useVirtualList(
+  queue,
+  { itemHeight: QUEUE_ITEM_HEIGHT, overscan: VIRTUAL_LIST_OVERSCAN }
+);
 </script>
 
 <template>
@@ -70,7 +70,7 @@ function onOverlayClick() {
             <span class="text-sm text-[var(--text-tertiary)]">{{ queue.length }} 首</span>
           </div>
           <div class="flex items-center gap-2">
-            <button v-if="queue.length > 0" class="md3-btn-text text-xs px-3 py-1" @click="emit('clear-queue')" aria-label="清空播放队列">
+            <button v-if="queue.length > 0" class="md3-btn-text text-xs px-3 py-1" @click="queueStore.clearQueue()" aria-label="清空播放队列">
               清空
             </button>
             <button class="md3-icon-btn-sm state-layer text-[var(--text-secondary)]" @click="closePanel" aria-label="关闭">
@@ -87,43 +87,48 @@ function onOverlayClick() {
             <h3 class="text-sm font-medium text-[var(--text-primary)] mb-1">播放队列为空</h3>
             <p class="text-xs text-[var(--text-tertiary)]">从库中添加歌曲开始播放</p>
           </div>
-          <div v-else class="p-2 space-y-1">
-            <div
-              v-for="(track, idx) in queue"
-              :key="track.id"
-              class="flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-[var(--hover-overlay)] transition-colors group no-select state-layer"
-              :class="{ 'bg-[var(--color-primary-container)]': idx === currentIndex }"
-            >
-              <div class="w-10 h-10 rounded-[4px] overflow-hidden flex-shrink-0 bg-[var(--bg-tertiary)]">
-                <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="" class="w-full h-full object-cover" />
-                <div v-else class="w-full h-full flex items-center justify-center">
-                  <Music :size="16" class="text-[var(--text-tertiary)]" />
-                </div>
-              </div>
-              <div class="flex-1 min-w-0 cursor-pointer" @click="emit('select-track', idx)">
-                <div class="text-sm font-medium truncate" :class="idx === currentIndex ? 'text-[var(--color-primary)]' : 'text-[var(--text-primary)]'">
-                  {{ track.title }}
-                </div>
-                <div class="text-xs text-[var(--text-tertiary)] truncate">{{ track.artist }}</div>
-              </div>
-              <div class="track-actions">
-                <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
-                <div class="track-action-btns opacity-0 group-hover:opacity-100">
-                  <button
-                    class="md3-icon-btn-xs state-layer"
-                    :class="favoritePaths.has(track.path) ? 'text-red-400' : ''"
-                    @click.stop="emit('toggle-favorite', track)"
-                    :aria-label="favoritePaths.has(track.path) ? '取消收藏' : '收藏'"
-                  >
-                    <Heart :size="16" :fill="favoritePaths.has(track.path) ? 'currentColor' : 'none'" />
-                  </button>
-                  <button
-                    class="md3-icon-btn-xs state-layer"
-                    @click.stop="emit('remove-track', idx)"
-                    :aria-label="`移除歌曲 ${track.title}`"
-                  >
-                    <X :size="16" />
-                  </button>
+          <div v-else class="p-2">
+            <div v-bind="containerProps" class="virtual-list-container">
+              <div v-bind="wrapperProps">
+                <div
+                  v-for="{ data: track, index: idx } in virtualList"
+                  :key="track.id"
+                  class="flex items-center gap-3 px-3 rounded-md hover:bg-[var(--hover-overlay)] transition-colors group no-select state-layer"
+                  :style="{ height: `${QUEUE_ITEM_HEIGHT - QUEUE_ITEM_GAP}px`, marginBottom: `${QUEUE_ITEM_GAP}px` }"
+                  :class="{ 'bg-[var(--color-primary-container)]': idx === currentIndex }"
+                >
+                  <div class="w-10 h-10 rounded-[4px] overflow-hidden flex-shrink-0 bg-[var(--bg-tertiary)]">
+                    <img v-if="track.coverUrl" :src="getCoverUrl(track.coverUrl)" alt="" class="w-full h-full object-cover" />
+                    <div v-else class="w-full h-full flex items-center justify-center">
+                      <Music :size="16" class="text-[var(--text-tertiary)]" />
+                    </div>
+                  </div>
+                  <div class="flex-1 min-w-0 cursor-pointer" @click="queueStore.playTrack(idx)">
+                    <div class="text-sm font-medium truncate" :class="idx === currentIndex ? 'text-[var(--color-primary)]' : 'text-[var(--text-primary)]'">
+                      {{ track.title }}
+                    </div>
+                    <div class="text-xs text-[var(--text-tertiary)] truncate">{{ track.artist }}</div>
+                  </div>
+                  <div class="track-actions">
+                    <span class="track-time group-hover:opacity-0">{{ formatTime(track.duration) }}</span>
+                    <div class="track-action-btns opacity-0 group-hover:opacity-100">
+                      <button
+                        class="md3-icon-btn-xs state-layer"
+                        :class="isTrackFavorite(track.path) ? 'text-red-400' : ''"
+                        @click.stop="toggleFavorite(track)"
+                        :aria-label="isTrackFavorite(track.path) ? '取消收藏' : '收藏'"
+                      >
+                        <Heart :size="16" :fill="isTrackFavorite(track.path) ? 'currentColor' : 'none'" />
+                      </button>
+                      <button
+                        class="md3-icon-btn-xs state-layer"
+                        @click.stop="queueStore.removeFromQueue(idx)"
+                        :aria-label="`移除歌曲 ${track.title}`"
+                      >
+                        <X :size="16" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -178,16 +183,22 @@ function onOverlayClick() {
   flex-direction: column;
   pointer-events: auto;
   will-change: transform;
-  transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
+  transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.35s ease;
 }
 
 .queue-open {
   transform: translateX(0);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
 }
 
 .queue-closed {
   transform: translateX(100%);
+  box-shadow: none;
+}
+
+.virtual-list-container {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .track-actions {

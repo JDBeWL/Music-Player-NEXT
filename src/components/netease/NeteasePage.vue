@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { useNeteaseAuthStore } from '@/stores/neteaseAuthStore';
 import { useNeteaseSearchStore } from '@/stores/neteaseSearchStore';
-import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import {
   Search,
   Loader2,
@@ -20,7 +20,7 @@ import SearchResultItem from '@/components/netease/SearchResultItem.vue';
 
 const authStore = useNeteaseAuthStore();
 const searchStore = useNeteaseSearchStore();
-const playbackStore = usePlaybackStore();
+const queueStore = useQueueStore();
 
 const localSearchQuery = ref('');
 const showLoginPanel = ref(false);
@@ -76,9 +76,9 @@ async function playSong(song: any) {
       if (lrc) {
         track.lrc = lrc;
       }
-      playbackStore.addToQueue(track);
-      const queueLength = playbackStore.queue.length;
-      playbackStore.playTrack(queueLength - 1);
+      queueStore.addToQueue(track);
+      const queueLength = queueStore.queue.length;
+      queueStore.playTrack(queueLength - 1);
       playingId.value = song.id;
     } else {
       errorMessage.value = '该歌曲暂无播放源，可能需要 VIP 或已下架';

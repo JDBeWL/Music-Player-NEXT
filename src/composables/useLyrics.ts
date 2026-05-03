@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue';
+import { shallowRef, ref, watch } from 'vue';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { LyricsParser } from '@/utils/lyricsParser';
@@ -14,7 +14,7 @@ interface EnhancedLyricLine {
 export function useLyrics() {
   const playbackStore = usePlaybackStore();
   const libraryStore = useLibraryStore();
-  const lyrics = ref<EnhancedLyricLine[]>([]);
+  const lyrics = shallowRef<EnhancedLyricLine[]>([]);
   const loading = ref(false);
   const lyricsSource = ref<'local' | 'online' | null>(null);
 

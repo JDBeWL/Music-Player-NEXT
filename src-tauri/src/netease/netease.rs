@@ -12,6 +12,7 @@ use std::fs;
 use tauri_plugin_dialog::DialogExt;
 use tauri::State;
 use crate::domain::app_state::AppState;
+use base64::Engine;
 
 const DEFAULT_API_BASE_URL: &str = "https://netease-cloud-music-api-two-sandy.vercel.app";
 
@@ -413,4 +414,48 @@ pub async fn save_file_dialog(app: tauri::AppHandle, default_name: String) -> Re
         });
 
     rx.recv().map_err(|e| e.to_string())
+}
+
+fn get_netease_auth_path() -> std::path::PathBuf {
+    crate::domain::utils::get_data_dir().join("netease_auth.dat")
+}
+
+#[tauri::command]
+pub async fn save_netease_auth(cookie: String, profile: String) -> Result<(), String> {
+    let dir = crate::domain::utils::ensure_data_dir().map_err(|e| e.to_string())?;
+    let path = dir.join("netease_auth.dat");
+
+    let payload = serde_json::json!({
+        "cookie": cookie,
+        "profile": profile,
+    });
+    let json_str = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(json_str.as_bytes());
+
+    fs::write(&path, encoded.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn load_netease_auth() -> Result<Option<String>, String> {
+    let path = get_netease_auth_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let encoded = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|e| e.to_string())?;
+    let json_str = String::from_utf8(decoded).map_err(|e| e.to_string())?;
+
+    Ok(Some(json_str))
+}
+
+#[tauri::command]
+pub async fn clear_netease_auth() -> Result<(), String> {
+    let path = get_netease_auth_path();
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

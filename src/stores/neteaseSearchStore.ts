@@ -27,6 +27,8 @@ export const useNeteaseSearchStore = defineStore('neteaseSearch', () => {
   const isSearching = ref(false);
   const searchError = ref<string | null>(null);
 
+  let searchSeq = 0;
+
   const currentNeteaseId = ref<number | null>(null);
 
   const apiBaseUrl = ref<string>('');
@@ -112,12 +114,15 @@ export const useNeteaseSearchStore = defineStore('neteaseSearch', () => {
       return;
     }
 
+    const currentSeq = ++searchSeq;
     isSearching.value = true;
     searchError.value = null;
 
     try {
       const offset = loadMore ? searchOffset.value : 0;
       const response = await searchSongs(query, offset, 30);
+
+      if (currentSeq !== searchSeq) return;
 
       if (response.code === 200 && response.result) {
         if (loadMore) {
@@ -130,10 +135,13 @@ export const useNeteaseSearchStore = defineStore('neteaseSearch', () => {
         searchOffset.value = offset + (response.result.songs?.length || 0);
       }
     } catch (error: any) {
+      if (currentSeq !== searchSeq) return;
       console.error('[NeteaseSearchStore] Search failed:', error);
       searchError.value = error.message || '搜索失败';
     } finally {
-      isSearching.value = false;
+      if (currentSeq === searchSeq) {
+        isSearching.value = false;
+      }
     }
   }
 
@@ -180,7 +188,7 @@ export const useNeteaseSearchStore = defineStore('neteaseSearch', () => {
       }
 
       const artists = song.ar || song.artists || [];
-      const artistName = artists.map((a: any) => a.name).join(', ');
+      const artistName = artists.map((a) => a.name).join(', ');
       const album = song.al || song.album;
       const albumName = album?.name || '未知专辑';
       const coverUrl = album?.picUrl || undefined;
@@ -225,7 +233,10 @@ export const useNeteaseSearchStore = defineStore('neteaseSearch', () => {
 
       const savedQuality = localStorage.getItem(NETEASE_QUALITY_KEY);
       if (savedQuality) {
-        quality.value = savedQuality as QualityLevel;
+        const validQualities: QualityLevel[] = ['standard', 'higher', 'exhigh', 'lossless', 'hires', 'jyeffect', 'jymaster'];
+        if (validQualities.includes(savedQuality as QualityLevel)) {
+          quality.value = savedQuality as QualityLevel;
+        }
       }
     } catch (error) {
       console.warn('[NeteaseSearchStore] Failed to restore state:', error);

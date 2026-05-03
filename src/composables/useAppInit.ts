@@ -1,16 +1,19 @@
 import { onMounted, onUnmounted } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { usePlaybackStore } from '@/stores/playbackStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useNeteaseAuthStore } from '@/stores/neteaseAuthStore';
 import { useNeteaseSearchStore } from '@/stores/neteaseSearchStore';
 import { usePlayerControls } from '@/composables/usePlayerControls';
+import { unifiedAudioPlayer } from '@/services/audio/UnifiedAudioPlayer';
 import type { Ref } from 'vue';
 
 export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
   const playbackStore = usePlaybackStore();
+  const queueStore = useQueueStore();
   const libraryStore = useLibraryStore();
   const playlistStore = usePlaylistStore();
   const configStore = useConfigStore();
@@ -20,7 +23,7 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
 
   function handleSavePlaybackBeforeClose() {
     if (configStore.persistPlayback) {
-      playbackStore.savePlaybackState(playbackStore.currentPlaylistId);
+      playbackStore.savePlaybackState(queueStore.currentPlaylistId);
     }
   }
 
@@ -35,7 +38,10 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
 
     const [loadedPlaylists] = await Promise.all([
       libraryStore.loadLibrary(),
-      playbackStore.loadVolumeSettings()
+      Promise.all([
+        playbackStore.loadVolumeSettings(),
+        queueStore.loadQueueSettings(),
+      ])
     ]);
 
     if (loadedPlaylists.length > 0) {
@@ -49,13 +55,18 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
       const playlist = playlistStore.playlists.find(p => p.id === playlistId);
       if (playlist) {
         playlistStore.currentPlaylistId = playlistId;
-        await playbackStore.restorePlaybackState(playlist.tracks, playlistId);
+        await queueStore.restorePlaybackState(playlist.tracks, playlistId);
       }
     }
 
     if (libraryStore.libraryTracks.length > 0) {
-      console.log('[App] Starting cover preload...');
-      libraryStore.preloadAllCovers(playlistStore.playlists);
+      const scheduleIdle = (window as any).requestIdleCallback
+        ? (window as any).requestIdleCallback
+        : (cb: () => void) => setTimeout(cb, 1000);
+      scheduleIdle(() => {
+        console.log('[App] Starting cover preload (idle)...');
+        libraryStore.preloadAllCovers(playlistStore.playlists);
+      });
     }
 
     window.addEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);
@@ -67,6 +78,7 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
 
   onUnmounted(() => {
     playbackStore.destroyPlayerListeners();
+    unifiedAudioPlayer.destroy();
     window.removeEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);
   });
 }

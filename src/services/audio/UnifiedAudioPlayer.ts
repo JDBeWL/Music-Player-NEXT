@@ -1,63 +1,136 @@
 import { NativeAudioPlayer } from './NativeAudioPlayer';
 import { FFmpegAudioService } from './FFmpegService';
 import type { AudioTrack, PlaybackState } from '@/types';
-import { needsFFmpegConversion } from '@/types';
+import { trackNeedsFFmpeg } from '@/types';
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type ProgressCallback = (currentTime: number, duration: number) => void;
 type TrackEndCallback = () => void;
 
-/**
- * 统一音频播放器管理器
- * 自动选择最优播放方式：
- * - 原生支持格式（mp3/flac/wav/ogg/m4a/aac）-> 流式播放，快速启动
- * - 特殊格式（ape/wma/tak/tta）-> FFmpeg Worker 转码
- */
 class UnifiedAudioPlayer {
   private nativePlayer: NativeAudioPlayer;
   private ffmpegPlayer: FFmpegAudioService;
   private currentPlayer: 'native' | 'ffmpeg' | null = null;
   private currentTrack: AudioTrack | null = null;
 
+  private stateListeners: Set<StateChangeCallback> = new Set();
+  private progressListeners: Set<ProgressCallback> = new Set();
+  private trackEndListeners: Set<TrackEndCallback> = new Set();
+
+  private activeStateUnsub: (() => void) | null = null;
+  private activeProgressUnsub: (() => void) | null = null;
+  private activeTrackEndUnsub: (() => void) | null = null;
+
   constructor() {
     this.nativePlayer = new NativeAudioPlayer();
     this.ffmpegPlayer = new FFmpegAudioService();
   }
 
-  /**
-   * 加载并播放音频
-   * @param track 音轨信息
-   * @param fileUrl 文件 URL（用于原生播放）
-   * @param audioData 音频数据（用于 FFmpeg 转码）
-   */
-  async loadAndPlay(track: AudioTrack, fileUrl: string, audioData?: Uint8Array): Promise<void> {
-    const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
+  private subscribeToActivePlayer(): void {
+    this.unsubscribeFromActivePlayer();
 
+    if (!this.currentPlayer) return;
+
+    const player = this.currentPlayer === 'native' ? this.nativePlayer : this.ffmpegPlayer;
+
+    this.activeStateUnsub = player.onStateChange((state) => {
+      [...this.stateListeners].forEach(cb => cb(state));
+    });
+
+    this.activeProgressUnsub = player.onProgress((currentTime, duration) => {
+      [...this.progressListeners].forEach(cb => cb(currentTime, duration));
+    });
+
+    this.activeTrackEndUnsub = player.onTrackEnd(() => {
+      [...this.trackEndListeners].forEach(cb => cb());
+    });
+  }
+
+  private unsubscribeFromActivePlayer(): void {
+    this.activeStateUnsub?.();
+    this.activeProgressUnsub?.();
+    this.activeTrackEndUnsub?.();
+    this.activeStateUnsub = null;
+    this.activeProgressUnsub = null;
+    this.activeTrackEndUnsub = null;
+  }
+
+  private async fetchAudioData(fileUrl: string): Promise<Uint8Array> {
+    const response = await fetch(fileUrl, { signal: AbortSignal.timeout(30000) });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch audio: ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
+  }
+
+  private async tryNativeWithFallback(
+    track: AudioTrack,
+    fileUrl: string,
+    autoPlay: boolean
+  ): Promise<void> {
+    try {
+      this.currentPlayer = 'native';
+      this.subscribeToActivePlayer();
+
+      if (autoPlay) {
+        await this.nativePlayer.loadAndPlay(track, fileUrl);
+      } else {
+        await this.nativePlayer.load(track, fileUrl);
+      }
+    } catch (nativeError) {
+      console.warn(
+        `[UnifiedPlayer] Native playback failed for "${track.title}", falling back to FFmpeg:`,
+        nativeError
+      );
+
+      this.nativePlayer.stop();
+
+      try {
+        const audioData = await this.fetchAudioData(fileUrl);
+        this.currentPlayer = 'ffmpeg';
+        this.subscribeToActivePlayer();
+
+        if (autoPlay) {
+          await this.ffmpegPlayer.loadAndPlay(track, audioData);
+        } else {
+          await this.ffmpegPlayer.load(track, audioData);
+        }
+      } catch (ffmpegError) {
+        console.error(
+          `[UnifiedPlayer] FFmpeg fallback also failed for "${track.title}":`,
+          ffmpegError
+        );
+        throw ffmpegError;
+      }
+    }
+  }
+
+  async loadAndPlay(track: AudioTrack, fileUrl: string, audioData?: Uint8Array): Promise<void> {
     this.stop();
     this.currentTrack = track;
 
-    if (needsFFmpegConversion(extension)) {
+    if (trackNeedsFFmpeg(track)) {
       this.currentPlayer = 'ffmpeg';
-      
+      this.subscribeToActivePlayer();
+
       if (!audioData) {
         throw new Error('Audio data required for FFmpeg conversion');
       }
-      
+
       await this.ffmpegPlayer.loadAndPlay(track, audioData);
     } else {
-      this.currentPlayer = 'native';
-      await this.nativePlayer.loadAndPlay(track, fileUrl);
+      await this.tryNativeWithFallback(track, fileUrl, true);
     }
   }
 
   async load(track: AudioTrack, fileUrl: string, audioData?: Uint8Array): Promise<void> {
-    const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
-
     this.stop();
     this.currentTrack = track;
 
-    if (needsFFmpegConversion(extension)) {
+    if (trackNeedsFFmpeg(track)) {
       this.currentPlayer = 'ffmpeg';
+      this.subscribeToActivePlayer();
 
       if (!audioData) {
         throw new Error('Audio data required for FFmpeg conversion');
@@ -65,16 +138,19 @@ class UnifiedAudioPlayer {
 
       await this.ffmpegPlayer.load(track, audioData);
     } else {
-      this.currentPlayer = 'native';
-      await this.nativePlayer.load(track, fileUrl);
+      await this.tryNativeWithFallback(track, fileUrl, false);
     }
   }
 
   async preload(track: AudioTrack, audioData: Uint8Array): Promise<void> {
-    const extension = track.format || track.path.split('.').pop()?.toLowerCase() || 'mp3';
-    
-    if (needsFFmpegConversion(extension)) {
+    if (trackNeedsFFmpeg(track)) {
       await this.ffmpegPlayer.preloadTrack(track, audioData);
+    }
+  }
+
+  preloadNative(track: AudioTrack, fileUrl: string): void {
+    if (!trackNeedsFFmpeg(track)) {
+      this.nativePlayer.preloadTrack(track, fileUrl);
     }
   }
 
@@ -95,6 +171,7 @@ class UnifiedAudioPlayer {
   }
 
   stop(): void {
+    this.unsubscribeFromActivePlayer();
     this.nativePlayer.stop();
     this.ffmpegPlayer.stop();
     this.currentPlayer = null;
@@ -145,34 +222,21 @@ class UnifiedAudioPlayer {
   }
 
   onStateChange(callback: StateChangeCallback): () => void {
-    const unsubNative = this.nativePlayer.onStateChange(callback);
-    const unsubFfmpeg = this.ffmpegPlayer.onStateChange(callback);
-    return () => {
-      unsubNative();
-      unsubFfmpeg();
-    };
+    this.stateListeners.add(callback);
+    return () => this.stateListeners.delete(callback);
   }
 
   onProgress(callback: ProgressCallback): () => void {
-    const unsubNative = this.nativePlayer.onProgress(callback);
-    const unsubFfmpeg = this.ffmpegPlayer.onProgress(callback);
-    return () => {
-      unsubNative();
-      unsubFfmpeg();
-    };
+    this.progressListeners.add(callback);
+    return () => this.progressListeners.delete(callback);
   }
 
   onTrackEnd(callback: TrackEndCallback): () => void {
-    const unsubNative = this.nativePlayer.onTrackEnd(callback);
-    const unsubFfmpeg = this.ffmpegPlayer.onTrackEnd(callback);
-    return () => {
-      unsubNative();
-      unsubFfmpeg();
-    };
+    this.trackEndListeners.add(callback);
+    return () => this.trackEndListeners.delete(callback);
   }
 
   async init(): Promise<void> {
-    // 预初始化 FFmpeg（在后台）
     await this.ffmpegPlayer.init();
   }
 
@@ -185,6 +249,10 @@ class UnifiedAudioPlayer {
   }
 
   async destroy(): Promise<void> {
+    this.unsubscribeFromActivePlayer();
+    this.stateListeners.clear();
+    this.progressListeners.clear();
+    this.trackEndListeners.clear();
     this.nativePlayer.destroy();
     await this.ffmpegPlayer.destroy();
   }
@@ -192,4 +260,3 @@ class UnifiedAudioPlayer {
 
 export const unifiedAudioPlayer = new UnifiedAudioPlayer();
 export { UnifiedAudioPlayer };
-
