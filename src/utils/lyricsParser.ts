@@ -7,8 +7,8 @@ const LRC_LINE_REGEX = /^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\](.*)$/
 const SRT_TIME_REGEX = /(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/
 const ASS_TIME_REGEX = /^(\d+):(\d{2}):(\d{2})\.(\d{2})$/
 
-const LRC_TIME_REGEX = new RegExp(`\\[${LRC_TIME_REGEX_SOURCE}\\]`, 'g')
-const ASS_KARAOKE_TAG_REGEX = /\{\\k[f]?(\d+)\}([^{}]*)/g
+const createLrcTimeRegex = () => new RegExp(`\\[${LRC_TIME_REGEX_SOURCE}\\]`, 'g')
+const createAssKaraokeTagRegex = () => /\{\\k[f]?(\d+)\}([^{}]*)/g
 const ASS_CLEAN_TAG_REGEX = /\{.*?\}/g
 
 function parseLrcTimestamp(minutes: string, seconds: string, msStr: string | undefined): number {
@@ -79,15 +79,15 @@ export class LyricsParser {
       }
 
       const line = lines[i]
-      LRC_TIME_REGEX.lastIndex = 0
+      const lrcTimeRegex = createLrcTimeRegex()
       const timestamps: Array<{ time: number; index: number }> = []
       let match: RegExpExecArray | null
-      while ((match = LRC_TIME_REGEX.exec(line)) !== null) {
+      while ((match = lrcTimeRegex.exec(line)) !== null) {
         const time = parseLrcTimestamp(match[1], match[2], match[3])
         timestamps.push({ time, index: match.index })
       }
       if (timestamps.length < 1) continue
-      const text = line.replace(LRC_TIME_REGEX, "").trim()
+      const text = line.replace(createLrcTimeRegex(), "").trim()
       if (!text) continue
       const startTime = timestamps[0].time
       resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }
@@ -168,9 +168,9 @@ export class LyricsParser {
       const parseKaraoke = (text: string): KaraokeWord[] => {
         const words: KaraokeWord[] = []
         let accTime = group.startTime
-        ASS_KARAOKE_TAG_REGEX.lastIndex = 0
+        const karaokeRegex = createAssKaraokeTagRegex()
         let match: RegExpExecArray | null
-        while ((match = ASS_KARAOKE_TAG_REGEX.exec(text)) !== null) {
+        while ((match = karaokeRegex.exec(text)) !== null) {
           const duration = parseInt(match[1]) * 0.01
           words.push({ text: match[2], start: accTime, end: accTime + duration })
           accTime += duration
@@ -196,8 +196,9 @@ export class LyricsParser {
       const trimmedLine = line.trim()
       if (!trimmedLine) continue
 
-      const timeMatches = [...trimmedLine.matchAll(LRC_TIME_REGEX)]
-      const textPart = trimmedLine.replace(LRC_TIME_REGEX, '').trim()
+      const lrcTimeRegex = createLrcTimeRegex()
+      const timeMatches = [...trimmedLine.matchAll(lrcTimeRegex)]
+      const textPart = trimmedLine.replace(createLrcTimeRegex(), '').trim()
 
       if (timeMatches.length > 0 && textPart) {
         for (const match of timeMatches) {

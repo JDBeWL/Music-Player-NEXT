@@ -10,7 +10,7 @@ export class NativeAudioPlayer {
   private state: PlaybackState = 'idle';
   private currentTrack: AudioTrack | null = null;
   private preloadedTrack: AudioTrack | null = null;
-  private _stopping = false;
+  private _isStopping = false;
 
   private stateListeners: Set<StateChangeCallback> = new Set();
   private trackEndListeners: Set<TrackEndCallback> = new Set();
@@ -44,7 +44,8 @@ export class NativeAudioPlayer {
     });
 
     this.audio.addEventListener('pause', () => {
-      if (this._stopping) return;
+      if (this._isStopping) return;
+      if (!this.audio.src) return;
       if (this.state === 'playing') {
         this.setState('paused');
       }
@@ -162,13 +163,13 @@ export class NativeAudioPlayer {
   }
 
   stop(): void {
-    this._stopping = true;
+    this._isStopping = true;
     this.audio.pause();
     this.audio.currentTime = 0;
     this.audio.src = '';
     this.progressTracker.stopTracking();
     this.setState('idle');
-    this._stopping = false;
+    this._isStopping = false;
   }
 
   seek(time: number): void {

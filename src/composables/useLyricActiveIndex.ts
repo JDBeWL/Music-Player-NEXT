@@ -1,13 +1,6 @@
 import { ref, watch, type Ref } from 'vue';
 import { usePlaybackStore } from '@/stores/playbackStore';
-import type { KaraokeWord } from '@/types';
-
-interface EnhancedLyricLine {
-  time: number;
-  texts: string[];
-  karaoke: boolean;
-  words?: KaraokeWord[];
-}
+import type { EnhancedLyricLine } from '@/types';
 
 const CALC_INTERVAL = 50;
 const KARAOKE_CALC_INTERVAL = 80;

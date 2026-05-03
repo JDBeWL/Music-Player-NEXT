@@ -78,7 +78,12 @@ export const useLibraryStore = defineStore('library', () => {
         totalUpdated += batchUpdated;
 
         if (i + BATCH_SIZE < allTracks.length) {
-          await new Promise(resolve => setTimeout(resolve, 0));
+          await new Promise<void>(resolve => {
+            const scheduleIdle = (window as any).requestIdleCallback
+              ? (window as any).requestIdleCallback
+              : (cb: () => void) => setTimeout(cb, 0);
+            scheduleIdle(() => resolve());
+          });
         }
       }
 
@@ -86,8 +91,7 @@ export const useLibraryStore = defineStore('library', () => {
         await saveLibrary(playlists);
       }
     } catch (error) {
-      console.error('[LibraryStore] Failed to preload covers:', error);
-      toast.error('封面预加载失败');
+      console.warn('[LibraryStore] Failed to preload covers:', error);
     }
   }
 
@@ -105,26 +109,24 @@ export const useLibraryStore = defineStore('library', () => {
         return track.lrc;
       }
 
-      const lrcPath = track.path.replace(/\.[^.]+$/, '.lrc');
-
-      const lrcUrl = convertFileSrc(lrcPath);
-      let response = await fetch(lrcUrl);
-
-      if (response.ok) {
-        const lrcText = await response.text();
-        cacheLyrics(track.id, lrcText);
-        return lrcText;
-      }
-
       const assPath = track.path.replace(/\.[^.]+$/, '.ass');
-
       const assUrl = convertFileSrc(assPath);
-      response = await fetch(assUrl);
+      let response = await fetch(assUrl);
 
       if (response.ok) {
         const assText = await response.text();
         cacheLyrics(track.id, assText);
         return assText;
+      }
+
+      const lrcPath = track.path.replace(/\.[^.]+$/, '.lrc');
+      const lrcUrl = convertFileSrc(lrcPath);
+      response = await fetch(lrcUrl);
+
+      if (response.ok) {
+        const lrcText = await response.text();
+        cacheLyrics(track.id, lrcText);
+        return lrcText;
       }
 
       return undefined;

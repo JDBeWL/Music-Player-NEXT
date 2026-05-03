@@ -62,11 +62,14 @@ async function initWorkerListeners(): Promise<void> {
     }
   };
   w.onerror = (error) => {
-    console.error('[ThemeColor] Worker error:', error);
+    console.warn('[ThemeColor] Worker error:', error);
     pendingWorkerCallbacks.forEach(cb => cb.reject(new Error('Worker error')));
     pendingWorkerCallbacks.clear();
   };
 }
+
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let abortController: AbortController | null = null;
 
 let listenersInitialized = false;
 
@@ -126,7 +129,7 @@ export function useThemeColor() {
 
         return theme;
       } catch (error) {
-        console.error('Failed to extract color:', error);
+        console.warn('Failed to extract color:', error);
         return null;
       } finally {
         pendingExtractions.delete(imageUrl);
@@ -148,9 +151,6 @@ export function useThemeColor() {
     const [r, g, b] = theme.rgb;
     root.setProperty('--color-primary-container', `rgba(${r}, ${g}, ${b}, 0.15)`);
   };
-
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let abortController: AbortController | null = null;
 
   const updateThemeFromCover = (coverUrl: string | undefined, immediate: boolean = false) => {
     if (!coverUrl) return;
@@ -176,7 +176,7 @@ export function useThemeColor() {
         }
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
-          console.error('Theme extraction error:', error);
+          console.warn('Theme extraction error:', error);
         }
       }
     };
@@ -196,6 +196,26 @@ export function useThemeColor() {
     colorCache.clear();
   };
 
+  const cleanup = () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+    pendingWorkerCallbacks.forEach(cb => cb.reject(new Error('Cleanup')));
+    pendingWorkerCallbacks.clear();
+    pendingExtractions.clear();
+    if (worker) {
+      worker.terminate();
+      worker = null;
+    }
+    workerInitPromise = null;
+    listenersInitialized = false;
+  };
+
   return {
     currentTheme,
     extractColorFromImage,
@@ -203,5 +223,6 @@ export function useThemeColor() {
     updateThemeFromCover,
     resetToDefault,
     clearCache,
+    cleanup,
   };
 }

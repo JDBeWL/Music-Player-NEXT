@@ -217,7 +217,7 @@ onMounted(() => {
       <div class="border-t border-[var(--border-subtle)] pt-3 space-y-2">
         <div class="flex items-center justify-between text-sm">
           <span class="text-[var(--text-primary)]">版本</span>
-          <span class="text-[var(--text-secondary)]">0.3.2</span>
+          <span class="text-[var(--text-secondary)]">0.3.3</span>
         </div>
         <div class="flex items-center justify-between text-sm">
           <span class="text-[var(--text-primary)]">技术栈</span>

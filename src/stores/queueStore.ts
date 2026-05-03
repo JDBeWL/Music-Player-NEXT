@@ -185,8 +185,8 @@ export const useQueueStore = defineStore('queue', () => {
       const currentPosInShuffle = shuffledOrder.value.indexOf(currentIndex.value);
       let nextPos = currentPosInShuffle + 1;
 
-      if (nextPos >= shuffledOrder.value.length) {
-        if (repeatMode.value === 'none') return;
+      if (currentPosInShuffle === -1 || nextPos >= shuffledOrder.value.length) {
+        if (repeatMode.value === 'none' && currentPosInShuffle !== -1) return;
         generateShuffledOrder();
         nextPos = 0;
       }

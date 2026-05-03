@@ -74,6 +74,13 @@ export interface LyricLine {
   karaoke?: KaraokeInfo | null;
 }
 
+export interface EnhancedLyricLine {
+  time: number;
+  texts: string[];
+  karaoke: boolean;
+  words?: KaraokeWord[];
+}
+
 export interface KeyboardShortcut {
   code: string;
   shift: boolean;

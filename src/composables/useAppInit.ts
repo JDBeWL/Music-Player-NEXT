@@ -9,6 +9,7 @@ import { useNeteaseAuthStore } from '@/stores/neteaseAuthStore';
 import { useNeteaseSearchStore } from '@/stores/neteaseSearchStore';
 import { usePlayerControls } from '@/composables/usePlayerControls';
 import { unifiedAudioPlayer } from '@/services/audio/UnifiedAudioPlayer';
+import { playerEvents } from '@/services/playerEvents';
 import type { Ref } from 'vue';
 
 export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
@@ -21,6 +22,8 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
   const neteaseSearchStore = useNeteaseSearchStore();
   const { handlePlayNext } = usePlayerControls();
 
+  let unsubTrackEnd: (() => void) | null = null;
+
   function handleSavePlaybackBeforeClose() {
     if (configStore.persistPlayback) {
       playbackStore.savePlaybackState(queueStore.currentPlaylistId);
@@ -29,7 +32,7 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
 
   onMounted(async () => {
     playbackStore.initPlayerListeners();
-    playbackStore.setOnTrackEndCallback(handlePlayNext);
+    unsubTrackEnd = playerEvents.on('track-end', handlePlayNext);
 
     await configStore.loadConfig();
 
@@ -77,6 +80,10 @@ export function useAppInit(closeHintDialog: Ref<{ open: () => void } | null>) {
   });
 
   onUnmounted(() => {
+    if (unsubTrackEnd) {
+      unsubTrackEnd();
+      unsubTrackEnd = null;
+    }
     playbackStore.destroyPlayerListeners();
     unifiedAudioPlayer.destroy();
     window.removeEventListener('save-playback-before-close', handleSavePlaybackBeforeClose);

@@ -1,12 +1,6 @@
 import { type Ref } from 'vue';
 import { useConfigStore } from '@/stores/configStore';
-
-interface EnhancedLyricLine {
-  time: number;
-  texts: string[];
-  karaoke: boolean;
-  words?: any[];
-}
+import type { EnhancedLyricLine } from '@/types';
 
 const STYLE_INVALIDATION_RANGE = 8;
 

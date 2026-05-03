@@ -44,6 +44,10 @@ export class ProgressTracker {
         this.progressRafId = null;
         return;
       }
+      if (this.progressListeners.size === 0) {
+        this.progressRafId = null;
+        return;
+      }
       [...this.progressListeners].forEach(cb => {
         cb(this.getTime(), this.getDuration());
       });

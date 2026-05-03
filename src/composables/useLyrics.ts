@@ -2,14 +2,7 @@ import { shallowRef, ref, watch } from 'vue';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { LyricsParser } from '@/utils/lyricsParser';
-import type { KaraokeWord } from '@/types';
-
-interface EnhancedLyricLine {
-  time: number;
-  texts: string[];
-  karaoke: boolean;
-  words?: KaraokeWord[];
-}
+import type { EnhancedLyricLine } from '@/types';
 
 export function useLyrics() {
   const playbackStore = usePlaybackStore();
@@ -42,7 +35,7 @@ export function useLyrics() {
         };
       });
     } catch (error) {
-      console.error('[useLyrics] Failed to parse lyrics:', error);
+      console.warn('[useLyrics] Failed to parse lyrics:', error);
       return [];
     }
   };
@@ -73,7 +66,7 @@ export function useLyrics() {
           lyricsSource.value = null;
         }
       } catch (error) {
-        console.error('Failed to parse lyrics:', error);
+        console.warn('[useLyrics] Failed to load lyrics:', error);
         lyrics.value = [];
         lyricsSource.value = null;
       } finally {

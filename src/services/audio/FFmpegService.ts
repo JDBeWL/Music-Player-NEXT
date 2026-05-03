@@ -1,6 +1,7 @@
 import type { AudioTrack, PlaybackState } from '@/types';
 import { trackNeedsFFmpeg, getAudioFormat } from '@/types';
 import { ProgressTracker } from './ProgressTracker';
+import { LRUMemoryCache } from '@/utils/lruCache';
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   if (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
@@ -11,11 +12,6 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
 
 type StateChangeCallback = (state: PlaybackState) => void;
 type TrackEndCallback = () => void;
-
-interface CachedAudio {
-  buffer: AudioBuffer;
-  size: number;
-}
 
 interface ConvertCompleteData {
   trackId: string;
@@ -46,11 +42,10 @@ class FFmpegAudioService {
   private isInitialized = false;
   private isInitializing = false;
 
-  private audioCache: Map<string, CachedAudio> = new Map();
-  private cacheMemoryBytes = 0;
-  private readonly MAX_CACHE_MEMORY_MB = 256;
-  private readonly MAX_CACHE_MEMORY_BYTES = this.MAX_CACHE_MEMORY_MB * 1024 * 1024;
-  private readonly MAX_CACHE_ENTRIES = 5;
+  private audioCache: LRUMemoryCache<string, AudioBuffer> = new LRUMemoryCache<string, AudioBuffer>(
+    5,
+    256 * 1024 * 1024
+  );
 
   private stateListeners: Set<StateChangeCallback> = new Set();
   private trackEndListeners: Set<TrackEndCallback> = new Set();
@@ -204,44 +199,13 @@ class FFmpegAudioService {
     return buffer.numberOfChannels * buffer.length * 4;
   }
 
-  private evictCacheIfNeeded(requiredBytes: number): void {
-    const targetBytes = this.MAX_CACHE_MEMORY_BYTES - requiredBytes;
-
-    while (this.audioCache.size > 0 && (this.cacheMemoryBytes > targetBytes || this.audioCache.size >= this.MAX_CACHE_ENTRIES)) {
-      const firstKey = this.audioCache.keys().next().value;
-      if (firstKey == null) break;
-      const cached = this.audioCache.get(firstKey);
-      if (cached) {
-        this.cacheMemoryBytes -= cached.size;
-      }
-      this.audioCache.delete(firstKey);
-    }
-  }
-
   private getCachedAudio(trackId: string): AudioBuffer | null {
-    const cached = this.audioCache.get(trackId);
-    if (cached) {
-      this.audioCache.delete(trackId);
-      this.audioCache.set(trackId, cached);
-      return cached.buffer;
-    }
-    return null;
+    return this.audioCache.get(trackId) ?? null;
   }
 
   private cacheAudio(trackId: string, buffer: AudioBuffer): void {
     const size = this.getAudioBufferSize(buffer);
-    this.evictCacheIfNeeded(size);
-
-    const existing = this.audioCache.get(trackId);
-    if (existing) {
-      this.cacheMemoryBytes -= existing.size;
-    }
-
-    this.audioCache.set(trackId, {
-      buffer,
-      size,
-    });
-    this.cacheMemoryBytes += size;
+    this.audioCache.set(trackId, buffer, size);
   }
 
   async preloadTrack(track: AudioTrack, audioData: Uint8Array): Promise<void> {
@@ -350,8 +314,9 @@ class FFmpegAudioService {
     this.sourceNode.buffer = this.audioBuffer;
     this.sourceNode.connect(this.gainNode);
 
+    const activeSource = this.sourceNode;
     this.sourceNode.onended = () => {
-      if (this.state === 'playing') {
+      if (this.sourceNode === activeSource && this.state === 'playing') {
         this.pauseTime = 0;
         [...this.trackEndListeners].forEach(cb => cb());
       }
@@ -418,7 +383,6 @@ class FFmpegAudioService {
 
   clearCache(): void {
     this.audioCache.clear();
-    this.cacheMemoryBytes = 0;
   }
 
   getCacheSize(): number {
@@ -426,7 +390,7 @@ class FFmpegAudioService {
   }
 
   getCacheMemoryMB(): number {
-    return this.cacheMemoryBytes / (1024 * 1024);
+    return this.audioCache.totalSize / (1024 * 1024);
   }
 
   async destroy(): Promise<void> {

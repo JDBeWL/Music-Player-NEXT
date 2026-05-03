@@ -79,7 +79,7 @@ const { lyrics, loading, cleanup: cleanupLyrics } = lyricsComposable;
 
 const hasCurrentTrack = computed(() => !!playbackStore.currentTrack);
 
-const { visualTime, stopAnimationLoop, handleVisibilityChange } = useLyricsAnimation();
+const { visualTime, notifySeek } = useLyricsAnimation();
 const { activeIndex, isTrackChanging } = useLyricActiveIndex(visualTime, lyrics);
 const { getLyricLineStyle } = useLyricStyle(activeIndex, lyrics);
 const {
@@ -90,7 +90,7 @@ const {
   cancelScrollAnimation,
   handleResize,
   cleanup: cleanupScroll,
-} = useLyricsScroll(containerRef, activeIndex, lyrics, isTrackChanging, visualTime);
+} = useLyricsScroll(containerRef, activeIndex, lyrics, isTrackChanging, visualTime, notifySeek);
 
 const isActive = (index: number) => index === activeIndex.value;
 
@@ -143,14 +143,11 @@ watch(loading, (newVal) => {
 
 onMounted(() => {
   window.addEventListener('resize', handleResize);
-  document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
 onUnmounted(() => {
-  stopAnimationLoop();
   cleanupScroll();
   window.removeEventListener('resize', handleResize);
-  document.removeEventListener('visibilitychange', handleVisibilityChange);
   cleanupLyrics();
 });
 </script>

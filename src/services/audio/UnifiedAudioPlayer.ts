@@ -55,13 +55,28 @@ class UnifiedAudioPlayer {
     this.activeTrackEndUnsub = null;
   }
 
-  private async fetchAudioData(fileUrl: string): Promise<Uint8Array> {
-    const response = await fetch(fileUrl, { signal: AbortSignal.timeout(30000) });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch audio: ${response.statusText}`);
+  private async fetchAudioData(fileUrl: string, retryCount = 0): Promise<Uint8Array> {
+    try {
+      const response = await fetch(fileUrl, {
+        signal: AbortSignal.timeout(30000),
+        cache: 'no-cache',
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText || 'Unknown error'}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    } catch (error) {
+      if (retryCount < 2) {
+        console.warn(
+          `[UnifiedPlayer] fetchAudioData failed (attempt ${retryCount + 1}/3), retrying...`,
+          error
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.fetchAudioData(fileUrl, retryCount + 1);
+      }
+      throw error;
     }
-    const arrayBuffer = await response.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
   }
 
   private async tryNativeWithFallback(

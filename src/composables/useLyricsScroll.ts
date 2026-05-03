@@ -17,7 +17,8 @@ export function useLyricsScroll(
   activeIndex: Ref<number>,
   lyrics: Ref<EnhancedLyricLine[]>,
   isTrackChanging: Ref<boolean>,
-  visualTime: Ref<number>
+  visualTime: Ref<number>,
+  notifySeek: () => void
 ) {
   const playbackStore = usePlaybackStore();
   const configStore = useConfigStore();
@@ -140,11 +141,7 @@ export function useLyricsScroll(
     await playbackStore.seek(time);
 
     visualTime.value = time;
-    const forceSync = () => {
-      visualTime.value = playbackStore.currentTime;
-    };
-    requestAnimationFrame(forceSync);
-    requestAnimationFrame(() => requestAnimationFrame(forceSync));
+    notifySeek();
 
     nextTick(() => scrollToActiveLyric(true, true, index));
   };

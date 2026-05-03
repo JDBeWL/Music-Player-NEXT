@@ -5,6 +5,7 @@ import type { AudioTrack, PlaybackState } from '@/types';
 import { trackNeedsFFmpeg } from '@/types';
 import { unifiedAudioPlayer } from '@/services/audio/UnifiedAudioPlayer';
 import { playbackPersistence } from '@/services/persistence/playbackPersistence';
+import { playerEvents } from '@/services/playerEvents';
 
 const LOAD_TIMEOUT_MS = 30000;
 const LARGE_FILE_THRESHOLD_MB = 150;
@@ -43,12 +44,6 @@ export const usePlaybackStore = defineStore('playback', () => {
   let _unsubTrackEnd: (() => void) | null = null;
   let _initialized = false;
 
-  let onTrackEndCallback: (() => void) | null = null;
-
-  function setOnTrackEndCallback(cb: (() => void) | null) {
-    onTrackEndCallback = cb;
-  }
-
   function initPlayerListeners() {
     if (_initialized) return;
     _initialized = true;
@@ -66,9 +61,7 @@ export const usePlaybackStore = defineStore('playback', () => {
     });
 
     _unsubTrackEnd = unifiedAudioPlayer.onTrackEnd(() => {
-      if (onTrackEndCallback) {
-        onTrackEndCallback();
-      }
+      playerEvents.emit('track-end');
     });
   }
 
@@ -246,7 +239,6 @@ export const usePlaybackStore = defineStore('playback', () => {
     savePlaybackState,
     loadPlaybackState,
     loadVolumeSettings,
-    setOnTrackEndCallback,
     initPlayerListeners,
     destroyPlayerListeners,
     waitForDuration,
