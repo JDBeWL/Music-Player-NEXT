@@ -23,7 +23,7 @@ export default defineConfig(async ({ command }) => ({
   build: {
     target: ["es2022", "chrome100", "safari15"],
     minify: "esbuild",
-    cssMinify: true,
+    cssMinify: "esbuild",
     rollupOptions: {
       output: {
         manualChunks: (id) => {
